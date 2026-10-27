@@ -15,6 +15,10 @@ html{scroll-behavior:smooth}
 .subnav{position:sticky;top:0;z-index:9;display:flex;gap:4px;flex-wrap:wrap;margin:0 0 14px;padding:8px 10px;background:#0f141c;border:1px solid #1e2430;border-radius:10px}
 .subnav a{font-size:12px;color:#aab4c5;padding:4px 9px;border-radius:7px}
 .subnav a:hover{background:#1a212c;color:#fff}
+.subnav a.on{background:#1c2433;color:#fff;font-weight:600}
+.tsearch{margin:6px 0 4px}
+.tsearch input{width:280px;max-width:100%;padding:7px 10px;border-radius:8px;background:#1c212b;border:1px solid #2a3240;color:#e7ebf2;font-size:12px}
+th{cursor:default}
 .withside{display:grid;grid-template-columns:180px minmax(0,1fr);gap:16px;align-items:start}
 .side{position:sticky;top:12px;display:flex;flex-direction:column;gap:2px;background:#141922;border:1px solid #1e2430;border-radius:12px;padding:8px}
 .side a{color:#aab4c5;text-decoration:none;font-size:13px;padding:6px 10px;border-radius:8px}
@@ -51,9 +55,6 @@ var navItems = []struct{ Label, Href, Key string }{
 	{"趋势", "/trend", "trend"},
 	{"详情", "/detail", "detail"},
 	{"规则", "/rules", "rules"},
-	{"媒体", "/media", "media"},
-	{"重复", "/dup", "dup"},
-	{"残留", "/leftovers", "leftovers"},
 	{"设置", "/settings", "settings"},
 }
 
@@ -73,11 +74,18 @@ func navBar(active string) string {
 
 // 统一外壳：所有子页面都用它，保证有导航栏
 func appShell(title, active, body string) string {
+	switch active {
+	case "dup", "media", "leftovers":
+		active = "clean"
+	}
+	if active == "clean" {
+		body = cleanTabs(cleanTabOf(title)) + body
+	}
 	return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>` + htmlEscape(title) + ` · diskmon</title>
 <link rel="icon" href="/favicon.ico">
-<style>` + css + navCSS + `</style></head><body><div class="wrap">` + navBar(active) + dataDirBanner() + muteBanner() + body + `</div></body></html>`
+<style>` + css + navCSS + `</style></head><body><div class="wrap">` + navBar(active) + dataDirBanner() + muteBanner() + body + uiJS + `</div></body></html>`
 }
 
 // ---------- 今日建议 ----------
@@ -420,3 +428,91 @@ func firstRunBanner(cfg Config, st *Store) string {
 <b>③</b> 想省事就点「懒人清理」（全部可撤销）。<br>
 <span class="muted">监测是只读的；任何清理都先进隔离区，7 天内可还原。</span></div>`
 }
+
+func cleanTabOf(title string) string {
+	switch {
+	case strings.Contains(title, "重复"):
+		return "dup"
+	case strings.Contains(title, "媒体"):
+		return "media"
+	case strings.Contains(title, "残留"):
+		return "leftovers"
+	default:
+		return "plan"
+	}
+}
+
+func cleanTabs(active string) string {
+	tabs := []struct{ Label, Href, Key string }{
+		{"方案", "/clean", "plan"},
+		{"重复", "/dup", "dup"},
+		{"媒体", "/media", "media"},
+		{"残留", "/leftovers", "leftovers"},
+		{"隔离区", "/detail#quarantine", "quarantine"},
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="subnav">`)
+	for _, x := range tabs {
+		cls := ""
+		if x.Key == active {
+			cls = ` class="on"`
+		}
+		b.WriteString(`<a href="` + x.Href + `"` + cls + `>` + x.Label + `</a>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+const uiJS = `<script>
+(function(){
+  function toBytes(s){
+    var m=/^([\d.]+)\s*(TB|GB|MB|KB|B)\s*$/i.exec(s.trim());
+    if(!m) return -1;
+    var v=parseFloat(m[1]); var u=m[2].toUpperCase();
+    var mul={B:1,KB:1024,MB:1048576,GB:1073741824,TB:1099511627776}[u]||1;
+    return v*mul;
+  }
+  function cmp(a,b){
+    var ba=toBytes(a), bb=toBytes(b);
+    if(ba>=0&&bb>=0) return ba-bb;
+    var na=parseFloat(a.replace(/[^0-9.\-]/g,'')), nb=parseFloat(b.replace(/[^0-9.\-]/g,''));
+    if(!isNaN(na)&&!isNaN(nb)&&/^[\d.,\s%]+$/.test(a+b)) return na-nb;
+    return a.localeCompare(b,'zh');
+  }
+  var tables=document.querySelectorAll('table');
+  for(var i=0;i<tables.length;i++){
+    (function(t){
+      var rows=Array.prototype.slice.call(t.rows);
+      if(rows.length<6) return;
+      var head=rows[0];
+      if(!head||head.cells.length===0||head.cells[0].tagName!=='TH') return;
+      var wrap=document.createElement('div'); wrap.className='tsearch';
+      var inp=document.createElement('input'); inp.placeholder='搜索（路径 / 名称）'; wrap.appendChild(inp);
+      t.parentNode.insertBefore(wrap,t);
+      inp.addEventListener('input',function(){
+        var q=inp.value.toLowerCase();
+        for(var r=1;r<rows.length;r++){
+          rows[r].style.display=rows[r].textContent.toLowerCase().indexOf(q)>=0?'':'none';
+        }
+      });
+      var cells=head.cells;
+      for(var c=0;c<cells.length;c++){
+        (function(th,ci){
+          if(!th||th.tagName!=='TH') return;
+          th.style.cursor='pointer'; th.title='点击排序';
+          var asc=true;
+          th.addEventListener('click',function(){
+            asc=!asc;
+            var body=rows.slice(1).filter(function(r){return r.cells.length>ci});
+            body.sort(function(x,y){
+              var r=cmp(x.cells[ci].innerText||'', y.cells[ci].innerText||'');
+              return asc?r:-r;
+            });
+            body.forEach(function(r){t.appendChild(r)});
+          });
+        })(cells[c],c);
+      }
+    })(tables[i]);
+  }
+})();
+</script>`

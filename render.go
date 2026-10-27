@@ -476,7 +476,7 @@ func renderPage(cfg Config, st *Store) string {
 	b.WriteString("<li>USN 秒级归因需要管理员权限；普通权限下退回热区重扫（10-40 秒延迟）。</li>")
 	b.WriteString("<li>mtime 回溯反映「仍留在盘上的新增内容」，真实净增长需累积几天采样。</li>")
 	b.WriteString("</ul></div>")
-	b.WriteString("<footer>diskmon-go · 单文件版 · 只读监测</footer></div></body></html>")
+	b.WriteString("<footer>diskmon-go · 单文件版 · 只读监测</footer></div>`+uiJS+`</body></html>")
 	return b.String()
 }
 

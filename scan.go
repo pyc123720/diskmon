@@ -220,6 +220,9 @@ func scanVolume(cfg Config, root string) *Scan {
 				return fs.SkipDir // 不把自己算进去
 			}
 			sc.Dirs++
+			if sc.Dirs%200 == 0 {
+				scanTick(sc.Files, sc.Dirs, sc.Total)
+			}
 			dirCat[path] = classify(strings.ToLower(path) + `\`)
 			return nil
 		}
@@ -231,6 +234,12 @@ func scanVolume(cfg Config, root string) *Scan {
 			return nil
 		}
 		seen++
+		if seen%500 == 0 {
+			scanTick(sc.Files, sc.Dirs, sc.Total)
+		}
+		if seen%2000 == 0 && scanCancelled() {
+			return fs.SkipAll
+		}
 		if seen%200000 == 0 {
 			fmt.Printf("  … 已遍历 %d 万项，累计 %.1f GB\n", seen/10000, float64(sc.Total)/1e9)
 		}
@@ -335,9 +344,15 @@ func scanVolume(cfg Config, root string) *Scan {
 }
 
 func runScan(cfg Config, st *Store) *Scan {
+	scanBegin(cfg.Root)
+	defer scanEnd()
 	fmt.Printf("扫描 %s（只读）…\n", cfg.Root)
 	sc := scanVolume(cfg, cfg.Root)
 	sc.Root = cfg.Root
+	if scanCancelled() {
+		st.AddAlert("scan", "扫描已取消，结果未保存")
+		return sc
+	}
 	vol, _ := volumeStats(cfg.Root)
 	sc.Used, sc.Free = vol.Used, vol.Free
 	st.SetScan(sc)

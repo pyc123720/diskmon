@@ -621,13 +621,19 @@ func serveHTTP(cfg Config, st *Store) {
 		}
 		if r.URL.Path == "/scan" {
 			startScanAsync(cfg, st)
-			rooth := htmlEscape(cfg.Root)
-			_, _ = w.Write([]byte(`<meta http-equiv="refresh" content="6;url=/"><body style="background:#0e1116;color:#e7ebf2;font:15px 'Segoe UI','Microsoft YaHei',sans-serif;padding:60px;max-width:720px">
-<h2>正在扫描 ` + rooth + ` …</h2>
-<p style="color:#8b94a7;line-height:1.9">只读扫描，不会改动任何文件。<br>
-第一次通常需要 <b>1–2 分钟</b>（文件越多越久，160 GB 实测约 100 秒）。<br>
-页面每 6 秒自动刷新，扫完会自动回到看板。</p>
-<p style="color:#5b6474">现在可以先不管它，托盘还在正常监测。</p></body>`))
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(scanPageHTML()))
+			return
+		}
+		if r.URL.Path == "/scan/cancel" {
+			cancelScan()
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		if r.URL.Path == "/api/scan/progress" {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			b, _ := json.Marshal(scanProgressNow())
+			_, _ = w.Write(b)
 			return
 		}
 		if r.URL.Path == "/api/status" {

@@ -19,7 +19,7 @@ needs three confirmations.
 
 | Area | What you get |
 |---|---|
-| Monitoring | free space, 3-level thresholds, daily auto-scan, growth forecast with confidence range |
+| Monitoring | free space, 3-level thresholds, daily auto-scan, growth forecast with confidence range, live scan progress (cancellable) |
 | Attribution | USN journal (1 s), per-process write I/O (approx.), jump vs leak detection |
 | Analysis | 20 categories, treemap, snapshot diff (vs last / 7 days ago), app aggregation |
 | Media split | images / video / documents / audio / archives / programs, per folder |
@@ -28,6 +28,7 @@ needs three confirmations.
 | Cleanup | one-click "lazy clean", 3 tiers, per-app, per-folder, media-by-type, L2 rules |
 | Safety | quarantine (7 days, size cap), whitelist/blocklist, dry-run first, undo |
 | Ops | single 8 MB exe, tray, `/api/health`, watchdog, signed builds |
+| UI | 6 top-level pages, cleanup tabs, every table sortable + searchable |
 
 ## Quick start
 

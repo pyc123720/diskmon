@@ -3,6 +3,12 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 1.5.0
+
+- Scan progress: live file/dir/GB counter, progress bar, cancellable (cancelled scans are not saved)
+- Navigation collapsed: 媒体 / 重复 / 残留 are now tabs inside 清理 (9 top-level items → 6)
+- Every table gets client-side search and click-to-sort (size-aware, handles GB/MB/KB)
+
 ## 1.4.1
 
 - First-run guidance banner when no scan exists (3 steps: scan → suggestion → lazy clean)
