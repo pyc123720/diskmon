@@ -55,6 +55,11 @@ Put `diskmon-go.exe` anywhere and run it. It starts in the tray; open the dashbo
 2. Read the **Today's suggestion** card.
 3. Click **Lazy clean** — it only touches temp/dev/update caches, everything is undoable.
 
+## Code signing
+
+Release binaries are self-signed today; [docs/SIGNING.md](docs/SIGNING.md) documents the
+free SignPath Foundation path for publicly trusted signing.
+
 ## Build from source
 
 Requirements: Windows 10/11, Go 1.27+, no third-party dependencies.

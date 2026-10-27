@@ -1,0 +1,45 @@
+name: signpath
+
+# Free OSS signing via SignPath Foundation.
+# Skipped until the repository variables are configured (see docs/SIGNING.md),
+# so `main` stays green before the account/application exists.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  sign:
+    if: ${{ vars.SIGNPATH_ORG_ID != '' }}
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build -trimpath -ldflags="-H windowsgui -s -w -X main.version=${{ github.ref_name }}" -o dist/diskmon-go.exe .
+
+      - name: Sign with SignPath
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORG_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: diskmon-exe
+          github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Upload signed exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: diskmon-signed
+          path: signed/diskmon-go.exe
