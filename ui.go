@@ -134,7 +134,7 @@ func todaySuggestion(cfg Config, st *Store) suggestion {
 	if bestFree > 0 {
 		return suggestion{
 			Title:  "确认一条规则，常驻自动清理",
-			Why:    fmt.Sprintf("规则「%s」试运行显示可释放 %s。确认启用后，它会按天自动处理；不放心可以先点「立即试运行」再决定。", bestRule, human(bestFree)),
+			Why:    fmt.Sprintf("自动清理「%s」试运行显示可释放 %s。确认启用后，它会按天自动处理；不放心可以先点「立即试运行」再决定。", bestRule, human(bestFree)),
 			Href:   "/rules",
 			Action: "去确认启用",
 			Extra:  "全部动作可还原（7 天）",
@@ -210,10 +210,10 @@ func overviewPage(cfg Config, st *Store) string {
 	b.WriteString(`</div></div></div>`)
 
 	// 路径体检入口
-	b.WriteString(`<div class="card" style="margin-top:14px"><h2>路径体检</h2>
+	b.WriteString(`<div class="card" style="margin-top:14px"><h2>查路径</h2>
 <form method="get" action="/inspect" style="display:flex;gap:8px;flex-wrap:wrap">
 <input name="path" placeholder="粘贴一个路径，看看能不能清（不会删除）" style="flex:1;min-width:260px;padding:9px 12px;background:#1c212b;border:1px solid #2a3240;border-radius:10px;color:#e7ebf2">
-<button class="btn" type="submit" style="cursor:pointer">体检</button></form></div>`)
+<button class="btn" type="submit" style="cursor:pointer">查一下</button></form></div>`)
 
 	// 懒人清理
 	lp := lazyPreview(cfg, st)
