@@ -1,6 +1,13 @@
 package main
 
 var zh2enExtra = map[string]string{
+	"全部进隔离区": "all to quarantine",
+	"类文件夹": "-type folders",
+	"天可还原": " days of undo",
+	"其余进隔离区": "the rest go to quarantine",
+	"可只清": "can clean just",
+	"的某一类": "of one type",
+	"按 图片/视频/文档/音频/压缩包 拆开看": "split by images / videos / documents / audio / archives",
 	"只清「可清」类：临时文件、开发缓存、更新缓存、日志。最安全，随时可还原。": "Only the safe tier: temp files, dev cache, update cache, logs. Safest, always restorable.",
 	"可清项 + 程序缓存/浏览器缓存（≥200MB）。不含聊天媒体、游戏库、模型。": "Safe items + app/browser caches (>=200 MB). Excludes chat media, game libraries, models.",
 	"所有可回收项（含聊天媒体、游戏、模型缓存，≥50MB）。风险最高，务必逐项看过再执行。": "All reclaimable items (incl. chat media, games, model caches, >=50 MB). Highest risk — review every item first.",
