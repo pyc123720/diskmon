@@ -308,17 +308,39 @@ func overviewPage(cfg Config, st *Store) string {
 <input name="path" placeholder="粘贴一个路径，看看能不能清（不会删除）" style="flex:1;min-width:260px;padding:9px 12px;background:#1c212b;border:1px solid #2a3240;border-radius:10px;color:#e7ebf2">
 <button class="btn" type="submit" style="cursor:pointer">查一下</button></form></div>`)
 
-	// 懒人清理
+	// 懒人清理（始终显示入口：清理完不能"消失"）
 	lp := lazyPreview(cfg, st)
-	if len(lp.Dirs) > 0 {
-		b.WriteString(`<div class="card" style="margin-top:14px;border-color:#33c17955"><h2>懒人清理</h2>`)
+	ls := lazyState()
+	b.WriteString(`<div class="card" style="margin-top:14px;border-color:#33c17955"><h2>懒人清理</h2>`)
+	switch {
+	case ls.Running:
+		pct := 0
+		if ls.Planned > 0 {
+			pct = int(float64(ls.Freed) / float64(ls.Planned) * 100)
+		}
+		b.WriteString(fmt.Sprintf(`<div><span class="big" style="font-size:26px;font-weight:700">%s</span> <span class="muted">/ 计划 %s · %d 个文件已移动</span></div>`,
+			human(ls.Freed), human(ls.Planned), ls.Files))
+		b.WriteString(fmt.Sprintf(`<div style="height:8px;background:#1c212b;border-radius:5px;overflow:hidden;margin:10px 0"><div style="height:100%%;width:%d%%;background:#33c179;transition:width .4s"></div></div>`, pct))
+		b.WriteString(`<a class="btn" href="/lazy">看进度</a>`)
+	case len(lp.Dirs) > 0:
 		b.WriteString(`<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">`)
 		b.WriteString(fmt.Sprintf(`<div><span class="big" style="font-size:26px;font-weight:700">%s</span> <span class="muted">可释放 · %d 个目录</span></div>`, human(lp.Bytes), len(lp.Dirs)))
 		b.WriteString(`<a class="btn" style="background:#1f6f4a;border-color:#33c179;padding:10px 20px" href="/lazy">一键清理（可撤销）</a>`)
 		b.WriteString(`<span class="muted">只清临时/开发缓存/更新缓存/日志，全部进隔离区</span>`)
-		b.WriteString(`<div class="muted" style="margin-top:6px">` + htmlEscape(lazyScheduleText(cfg)) + `</div>`)
-		b.WriteString(`</div></div>`)
+		b.WriteString(`</div>`)
+	case !ls.Finished.IsZero():
+		b.WriteString(fmt.Sprintf(`<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap"><div><span class="big" style="font-size:26px;font-weight:700">%s</span> <span class="muted">上次实际释放 · 计划 %s</span></div>`,
+			human(ls.Freed), human(ls.Planned)))
+		b.WriteString(`<a class="btn" href="/lazy">查看 / 撤销</a>`)
+		b.WriteString(`<span class="muted">隔离区里的项 7 天内可还原</span></div>`)
+	default:
+		b.WriteString(`<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">`)
+		b.WriteString(`<span class="muted">当前没有达到阈值的可清目录；已清理的项在隔离区里，7 天内可撤销。</span>`)
+		b.WriteString(`<a class="btn" href="/lazy">打开懒人清理</a>`)
+		b.WriteString(`</div>`)
 	}
+	b.WriteString(`<div class="muted" style="margin-top:6px">` + htmlEscape(lazyScheduleText(cfg)) + `</div>`)
+	b.WriteString(`</div>`)
 
 	// 三个主动作
 	b.WriteString(`<div class="tiles" style="grid-template-columns:repeat(3,minmax(0,1fr))">`)

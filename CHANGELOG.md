@@ -3,6 +3,12 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.4.5
+
+- The lazy-clean card stays on the overview after a cleanup: it used to disappear once nothing
+  qualified for cleaning, which made the feature look gone. It now shows the running progress,
+  the last result (planned vs actual) with undo, or an explicit "nothing to clean" state.
+
 ## 2.4.4
 
 - Lazy clean no longer silently moves less than advertised: if a whole-folder move fails because
