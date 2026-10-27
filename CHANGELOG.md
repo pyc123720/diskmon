@@ -3,7 +3,30 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.4.0
+
+First public release.
+
+- Release assets: diskmon-go.exe (self-signed, Windows GUI, 8.5 MB) and a portable zip.
+- Tray monitor with USN-journal attribution; reversible quarantine cleanup (7-day undo).
+- Presets, scheduled lazy clean, parallel scan and incremental rescan (100 s -> 2.1 s on the reference machine).
+- Web UI on localhost: 6 pages, sortable/searchable tables, CSV export, light/dark theme, English/Chinese.
+- MCP entry point (diskmon-go.exe mcp) exposing read-only and reversible tools.
+
+## 2.3.6
+
+- Unknown paths returned 200 + overview; now a 404 page.
+- ?lang=en was ignored when a language cookie existed; explicit query now wins.
+- MCP diskmon_inspect on a missing path reported 0 bytes; it now errors.
+
+## 2.3.2 - 2.3.5
+
+- English UI completed: 256+ phrase entries, single-character keys removed, whole-sentence
+  translations for plan/risk cards, settings, export, media, rules and trend pages.
+- Dynamic "plus N more" rows localized via nFormat.
+
 ## 2.3.0
+
 
 - English UI: per-request language (cookie / `?lang=en` / `Accept-Language`), nav toggle `EN / 中文`.
   A phrase dictionary translates the chrome (nav, overview, settings, cleanup, rules, categories, tiers,
