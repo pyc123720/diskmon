@@ -3,6 +3,12 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 1.7.0
+
+- Light theme with a nav toggle (cookie-persisted), full palette override
+- CSV export for dirs / files / apps / duplicates / media / alerts / quarantine (UTF-8 BOM for Excel)
+- Responsive layout: grids collapse, tables scroll, sidebar turns into a horizontal strip under 820px
+
 ## 1.6.1
 
 - Path inspection (`/inspect`): paste any file/folder path to see size, file count,

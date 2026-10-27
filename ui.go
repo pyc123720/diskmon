@@ -47,6 +47,15 @@ th{cursor:default}
 .ring .pct{font-size:26px;font-weight:700}
 .ring .lbl{font-size:12px;color:#8b94a7;margin-top:2px}
 @media(max-width:900px){.tiles{grid-template-columns:1fr 1fr}.ringwrap{flex-direction:column;align-items:flex-start}}
+@media(max-width:820px){
+  .grid.g2,.grid.g3,.withside{grid-template-columns:1fr!important}
+  .wrap{padding:14px!important}
+  .nav{gap:2px}
+  table{display:block;overflow-x:auto;white-space:nowrap}
+  .side{position:static!important;flex-direction:row!important;overflow-x:auto}
+  .ring{width:132px;height:132px}
+  .ring .inner{width:104px;height:104px}
+}
 `
 
 var navItems = []struct{ Label, Href, Key string }{
@@ -69,7 +78,14 @@ func navBar(active string) string {
 		}
 		b.WriteString(fmt.Sprintf(`<a href="%s"%s>%s</a>`, it.Href, cls, it.Label))
 	}
-	b.WriteString(`<span style="flex:1"></span><a href="/detail/overview" title="分区页">分区页</a><a href="/detail" title="全部数据">⤢ 全部</a></div>`)
+	b.WriteString(`<span style="flex:1"></span>`)
+	b.WriteString(`<a href="/export" title="导出 CSV">导出</a>`)
+	if currentTheme() == "light" {
+		b.WriteString(`<a href="/theme?mode=dark" title="切换到暗色">🌙 暗色</a>`)
+	} else {
+		b.WriteString(`<a href="/theme?mode=light" title="切换到亮色">☀ 亮色</a>`)
+	}
+	b.WriteString(`<a href="/detail/overview" title="分区页">分区页</a><a href="/detail" title="全部数据">⤢ 全部</a></div>`)
 	return b.String()
 }
 
@@ -86,7 +102,7 @@ func appShell(title, active, body string) string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>` + htmlEscape(title) + ` · diskmon</title>
 <link rel="icon" href="/favicon.ico">
-<style>` + css + navCSS + `</style></head><body><div class="wrap">` + navBar(active) + dataDirBanner() + muteBanner() + body + uiJS + `</div></body></html>`
+<style>` + css + navCSS + themeCSS() + `</style></head><body><div class="wrap">` + navBar(active) + dataDirBanner() + muteBanner() + body + uiJS + `</div></body></html>`
 }
 
 // ---------- 今日建议 ----------
@@ -523,3 +539,10 @@ const uiJS = `<script>
   }
 })();
 </script>`
+
+func themeCSS() string {
+	if currentTheme() == "light" {
+		return lightCSS
+	}
+	return ""
+}

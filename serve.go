@@ -583,6 +583,7 @@ func serveHTTP(cfg Config, st *Store) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		inc(&httpReqs)
+		uiTheme.Store(themeFromRequest(r))
 		defer func() {
 			if rec := recover(); rec != nil {
 				inc(&httpPanics)
@@ -688,6 +689,25 @@ func serveHTTP(cfg Config, st *Store) {
 				clearMute()
 			}
 			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		case "/theme":
+			mode := r.URL.Query().Get("mode")
+			if mode != "light" {
+				mode = "dark"
+			}
+			http.SetCookie(w, &http.Cookie{Name: themeCookie, Value: mode, Path: "/", MaxAge: 86400 * 365})
+			ref := r.URL.Query().Get("back")
+			if ref == "" || !strings.HasPrefix(ref, "/") {
+				ref = "/"
+			}
+			http.Redirect(w, r, ref, http.StatusSeeOther)
+			return
+		case "/export":
+			if r.URL.Query().Get("what") == "" {
+				_, _ = w.Write([]byte(exportPage(cfg)))
+				return
+			}
+			handleExport(cfg, st, q, w, r)
 			return
 		case "/inspect":
 			_, _ = w.Write([]byte(inspectPage(cfg, st, r.URL.Query().Get("path"))))

@@ -65,6 +65,7 @@ func settingsPage(cfg Config, notice string) string {
 	b.WriteString(fmt.Sprintf(`<div class="muted">配置文件：<code>%s</code></div>`, htmlEscape(exeDir()+`\config.json`)))
 	b.WriteString(`</div>`)
 
+	b.WriteString(`<div class="muted" style="margin:10px 0">导出：<a href="/export">CSV 报告</a>（目录/大文件/应用/重复/媒体/告警/隔离区）</div>`)
 	b.WriteString(`<div style="margin-top:16px"><button class="btn" type="submit" style="cursor:pointer;background:#1f6f4a;border-color:#33c179">保存设置</button>`)
 	b.WriteString(`<a class="btn" href="/settings/reset">恢复默认</a>`)
 	b.WriteString(`<a class="btn" href="/">返回总览</a></div></form>`)

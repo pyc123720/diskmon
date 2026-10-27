@@ -96,7 +96,7 @@ func renderPage(cfg Config, st *Store) string {
 
 	b.WriteString("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">")
 	b.WriteString("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
-	b.WriteString("<title>diskmon · 磁盘监测</title><link rel=\"icon\" href=\"/favicon.ico\"><style>" + css + navCSS + "</style></head><body><div class=\"wrap\">")
+	b.WriteString("<title>diskmon · 磁盘监测</title><link rel=\"icon\" href=\"/favicon.ico\"><style>" + css + navCSS + themeCSS() + "</style></head><body><div class=\"wrap\">")
 	b.WriteString(navBar("detail"))
 	b.WriteString(dataDirBanner())
 	b.WriteString(scanMismatchBanner(cfg, st))
