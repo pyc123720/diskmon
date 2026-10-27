@@ -11,12 +11,15 @@ import (
 // ---------- 扫描进度 ----------
 
 type scanState struct {
-	mu      sync.Mutex
-	running bool
-	root    string
-	errs    int
-	started time.Time
-	cancel  atomic.Bool
+	mu        sync.Mutex
+	running   bool
+	root      string
+	errs      int
+	started   time.Time
+	prevFiles int64
+	prevTime  time.Time
+	rate      float64
+	cancel    atomic.Bool
 }
 
 var (
@@ -63,6 +66,9 @@ func scanBegin(root string) {
 	scanProg.errs = 0
 	scanProg.started = time.Now()
 	scanProg.cancel.Store(false)
+	scanProg.prevFiles = 0
+	scanProg.prevTime = time.Time{}
+	scanProg.rate = 0
 	scanProg.mu.Unlock()
 	scanRecentMu.Lock()
 	scanRecent = nil
@@ -136,6 +142,21 @@ func scanProgressNow() scanProgress {
 	if !scanProg.started.IsZero() {
 		p.Elapsed = time.Since(scanProg.started).Seconds()
 	}
+	now := time.Now()
+	if scanProg.prevTime.IsZero() {
+		scanProg.prevFiles = int64(p.Files)
+		scanProg.prevTime = now
+	} else if dt := now.Sub(scanProg.prevTime).Seconds(); dt >= 0.6 {
+		inst := (float64(p.Files) - float64(scanProg.prevFiles)) / dt
+		if scanProg.rate == 0 {
+			scanProg.rate = inst
+		} else {
+			scanProg.rate = 0.7*scanProg.rate + 0.3*inst
+		}
+		scanProg.prevFiles = int64(p.Files)
+		scanProg.prevTime = now
+	}
+	smoothed := scanProg.rate
 	scanProg.mu.Unlock()
 	p.Cancelled = scanProg.cancel.Load()
 	if v, ok := scanCur.Load().(string); ok {
@@ -146,6 +167,10 @@ func scanProgressNow() scanProgress {
 		p.Rate = float64(p.Files) / p.Elapsed
 		p.MBps = float64(p.Bytes) / p.Elapsed / (1 << 20)
 	}
+	if smoothed > 0 {
+		p.Rate = smoothed
+		p.MBps = (p.MBps*0.5 + float64(p.Bytes)/p.Elapsed/(1<<20)*0.5)
+	}
 	if p.Running {
 		if exp := int(scanExpected.Load()); exp > 0 && p.Files > 0 {
 			// 用上次扫描的文件总数更稳：早期扫到大文件时字节占比会虚高
@@ -154,7 +179,11 @@ func scanProgressNow() scanProgress {
 				p.Pct = 99
 			}
 			if p.Pct > 0.5 {
-				p.ETA = p.Elapsed * (float64(exp) - float64(p.Files)) / float64(p.Files)
+				if smoothed > 0 {
+					p.ETA = (float64(exp) - float64(p.Files)) / smoothed
+				} else {
+					p.ETA = p.Elapsed * (float64(exp) - float64(p.Files)) / float64(p.Files)
+				}
 			}
 		} else if p.Root != "" {
 			if v, err := volumeStats(p.Root); err == nil && v.Used > 0 {

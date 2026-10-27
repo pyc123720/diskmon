@@ -364,6 +364,25 @@ func quarantineRoutes(cfg Config, st *Store, q *Quarantine, w http.ResponseWrite
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(pageShell("删除演练", b.String())))
 		return true
+	case "/q":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(qPage(cfg, st)))
+		return true
+	case "/q/restore-batch":
+		ids := qRestoreIDs(cfg, r.URL.Query().Get("all") == "1", r.URL.Query()["ids"])
+		if len(ids) == 0 {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(pageShell("批量还原", `<div class="warn">没有选择任何隔离项。</div><a class="btn" href="/q">返回隔离区</a>`)))
+			return true
+		}
+		if !startRestoreOp(cfg, st, ids, fmt.Sprintf("批量还原（%d 项）", len(ids))) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(pageShell("繁忙", `<div class="warn">已有任务在运行。</div><a class="btn" href="/op">看进度</a>`)))
+			return true
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(opPage(cfg, st)))
+		return true
 	case "/q/apply":
 		path, ok := takeTicket(r.URL.Query().Get("n"))
 		if !ok {

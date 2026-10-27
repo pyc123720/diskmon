@@ -3,6 +3,14 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.5.4
+
+- Added the quarantine page (/q), which used to 404 even though "去隔离区" linked to it:
+  lists unfinished quarantined items, per-item restore, checkbox batch restore, restore-all, and
+  index rebuild. Batch restore runs through the background progress framework.
+- Scan ETA now uses a smoothed recent throughput (files/s over the last samples) instead of
+  average-since-start, so the estimate stays honest when speed varies.
+
 ## 2.5.3
 
 - Every file-moving action now uses the background progress framework: restore, undo lazy clean,
