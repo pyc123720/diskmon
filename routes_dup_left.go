@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 )
 
 func dupLeftRoutes(cfg Config, st *Store, q *Quarantine, w http.ResponseWriter, r *http.Request) bool {
@@ -25,26 +24,41 @@ func dupLeftRoutes(cfg Config, st *Store, q *Quarantine, w http.ResponseWriter, 
 		return true
 	case "/dup/apply":
 		kind, hash, ok := takeTicketKind(r.URL.Query().Get("n"))
-		var b strings.Builder
 		if !ok || kind != "dup" {
-			b.WriteString(`<div class="warn">票据无效或已过期，请重新打开重复文件页。</div>`)
-		} else {
-			n, freed, fails := dupApplyGroup(cfg, st, q, hash, true)
-			b.WriteString(fmt.Sprintf(`<div class="ok">已隔离 <b>%d</b> 份副本，释放 <b>%s</b>（每组保留第一份，可在看板还原）</div>`, n, human(freed)))
-			if len(fails) > 0 {
-				b.WriteString(fmt.Sprintf(`<div class="warn">%d 个失败：<br>`, len(fails)))
-				for i, f := range fails {
-					if i >= 5 {
-						break
-					}
-					b.WriteString("<code>" + htmlEscape(f) + "</code><br>")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(pageShell("重复文件", `<div class="warn">票据无效或已过期，请重新打开重复文件页。</div><a class="btn" href="/dup">返回重复文件</a>`)))
+			return true
+		}
+		var paths []string
+		if res := loadDups(cfg); res != nil {
+			for i := range res.Groups {
+				if res.Groups[i].Hash == hash {
+					paths = append(paths, res.Groups[i].Paths[1:]...)
+					break
 				}
-				b.WriteString("</div>")
 			}
 		}
-		b.WriteString(`<a class="btn" href="/dup">返回重复文件</a>`)
+		var movable []string
+		skippedInstall := 0
+		for _, p := range paths {
+			if isInstallPath(p) {
+				skippedInstall++
+				continue
+			}
+			movable = append(movable, p)
+		}
+		if len(movable) == 0 {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(pageShell("重复文件", `<div class="warn">这一组没有可隔离的副本（可能都在安装目录里）。</div><a class="btn" href="/dup">返回重复文件</a>`)))
+			return true
+		}
+		if !startQuarantineOpReason(cfg, st, movable, fmt.Sprintf("重复文件副本（%d 份，跳过安装目录 %d 份）", len(movable), skippedInstall), "dup") {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(pageShell("繁忙", `<div class="warn">已有任务在运行。</div><a class="btn" href="/op">看进度</a>`)))
+			return true
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(pageShell("重复文件隔离结果", b.String())))
+		_, _ = w.Write([]byte(opPage(cfg, st)))
 		return true
 	case "/leftovers":
 		if r.URL.Query().Get("refresh") == "1" {

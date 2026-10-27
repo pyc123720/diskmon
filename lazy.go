@@ -292,3 +292,9 @@ func lazyProgressBase() (uint64, int, int) {
 	defer lazyMu.Unlock()
 	return lazyCur.Freed, lazyCur.Files, lazyCur.SkippedFiles
 }
+
+func lazyClearIDs() {
+	lazyMu.Lock()
+	lazyCur.IDs = nil
+	lazyMu.Unlock()
+}

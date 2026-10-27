@@ -400,17 +400,18 @@ func quarantineRoutes(cfg Config, st *Store, q *Quarantine, w http.ResponseWrite
 		return true
 	case "/q/restore":
 		id := r.URL.Query().Get("id")
-		e, err := q.restore(id)
-		var b strings.Builder
-		if err != nil {
-			b.WriteString(`<div class="warn">还原失败：` + htmlEscape(err.Error()) + `</div>`)
-		} else {
-			st.AddAlert("restore", fmt.Sprintf("已还原 %s", e.Original))
-			b.WriteString(`<div class="ok">已还原到 <code>` + htmlEscape(e.Original) + `</code></div>`)
+		if id == "" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(pageShell("还原", `<div class="warn">缺少隔离项 ID。</div><a class="btn" href="/q">返回隔离区</a>`)))
+			return true
 		}
-		b.WriteString(`<a class="btn" href="/">返回看板</a>`)
+		if !startRestoreOp(cfg, st, []string{id}, "还原隔离项") {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(pageShell("繁忙", `<div class="warn">已有任务在运行。</div><a class="btn" href="/op">看进度</a>`)))
+			return true
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(pageShell("还原", b.String())))
+		_, _ = w.Write([]byte(opPage(cfg, st)))
 		return true
 	case "/q/purge":
 		n, bytes := q.purge(cfg.QuarantineDays)
@@ -866,12 +867,22 @@ func serveHTTP(cfg Config, st *Store) {
 		case "/media/batch":
 			_, _ = w.Write([]byte(mediaBatchPage(r.URL.Query().Get("id"))))
 		case "/media/undo":
-			q := openQuarantine(cfg)
-			n, freed := undoMediaBatch(q, st, r.URL.Query().Get("id"))
-			var b strings.Builder
-			b.WriteString(fmt.Sprintf(`<div class="ok">已撤销：还原 %d 个文件，%s</div>`, n, human(freed)))
-			b.WriteString(`<a class="btn" href="/media">返回媒体分类</a>`)
-			_, _ = w.Write([]byte(appShell("撤销媒体清理", "media", b.String())))
+			batch := r.URL.Query().Get("id")
+			var ids []string
+			for _, e := range q.entries() {
+				if e.Reason == "media:"+batch && !e.Restored {
+					ids = append(ids, e.ID)
+				}
+			}
+			if len(ids) == 0 {
+				_, _ = w.Write([]byte(appShell("撤销媒体清理", "media", `<div class="ok">没有可撤销的记录。</div><a class="btn" href="/media">返回媒体分类</a>`)))
+				return
+			}
+			if !startRestoreOp(cfg, st, ids, "撤销媒体清理") {
+				_, _ = w.Write([]byte(appShell("繁忙", "media", `<div class="warn">已有任务在运行。</div><a class="btn" href="/op">看进度</a>`)))
+				return
+			}
+			_, _ = w.Write([]byte(opPage(cfg, st)))
 		case "/lazy":
 			_, _ = w.Write([]byte(lazyPage(cfg, st)))
 		case "/lazy/start":
@@ -880,12 +891,17 @@ func serveHTTP(cfg Config, st *Store) {
 			_, _ = w.Write([]byte(lazyResultPage(cfg, st, ok)))
 			return
 		case "/lazy/undo":
-			q := openQuarantine(cfg)
-			n, freed := lazyUndo(cfg, q, st)
-			var b strings.Builder
-			b.WriteString(fmt.Sprintf(`<div class="ok">已撤销：还原 <b>%d</b> 个目录，<b>%s</b></div>`, n, human(freed)))
-			b.WriteString(`<a class="btn" href="/lazy">返回懒人清理</a><a class="btn" href="/">回总览</a>`)
-			_, _ = w.Write([]byte(appShell("撤销清理", "clean", b.String())))
+			ids := lazySeenIDs()
+			if len(ids) == 0 {
+				_, _ = w.Write([]byte(appShell("撤销清理", "clean", `<div class="warn">没有可撤销的记录（可能已撤销或服务重启过）。请到隔离区手动还原。</div><a class="btn" href="/q">去隔离区</a>`)))
+				return
+			}
+			lazyClearIDs()
+			if !startRestoreOp(cfg, st, ids, "撤销懒人清理") {
+				_, _ = w.Write([]byte(appShell("繁忙", "clean", `<div class="warn">已有任务在运行。</div><a class="btn" href="/op">看进度</a>`)))
+				return
+			}
+			_, _ = w.Write([]byte(opPage(cfg, st)))
 			return
 		case "/trend":
 			_, _ = w.Write([]byte(trendPage(cfg, st)))

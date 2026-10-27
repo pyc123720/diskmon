@@ -3,6 +3,13 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.5.3
+
+- Every file-moving action now uses the background progress framework: restore, undo lazy clean,
+  undo media batch, and duplicate-copy cleanup. The page returns immediately and shows bytes moved,
+  files, skipped items and any failures; only one job runs at a time.
+- Verified: restoring a 281 MB / 2,712-file quarantine entry reports progress and puts every file back.
+
 ## 2.5.2
 
 - Quarantine and preset-cleanup now run in the background with a live progress page: bytes moved,
