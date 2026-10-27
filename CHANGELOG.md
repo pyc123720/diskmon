@@ -3,6 +3,13 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.3.0
+
+- English UI: per-request language (cookie / `?lang=en` / `Accept-Language`), nav toggle `EN / 中文`.
+  A phrase dictionary translates the chrome (nav, overview, settings, cleanup, rules, categories, tiers,
+  table headers) and key dynamic sentences have explicit English branches.
+  Data (alert bodies, log lines) stays in its original language.
+
 ## 2.2.0
 
 - MCP entry point: `diskmon-go.exe mcp` speaks MCP over stdio (JSON-RPC, newline-delimited).

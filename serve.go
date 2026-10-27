@@ -593,6 +593,7 @@ func serveHTTP(cfg Config, st *Store) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		inc(&httpReqs)
 		uiTheme.Store(themeFromRequest(r))
+		curLang.Store(langFromRequest(r))
 		cfg = getConfig() // 每次请求都取最新配置，否则改设置后页面仍用启动时的快照
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -702,6 +703,14 @@ func serveHTTP(cfg Config, st *Store) {
 				clearMute()
 			}
 			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		case "/lang":
+			to := r.URL.Query().Get("to")
+			if to != "en" {
+				to = "zh"
+			}
+			http.SetCookie(w, &http.Cookie{Name: langCookie, Value: to, Path: "/", MaxAge: 86400 * 365})
+			http.Redirect(w, r, safeBack(r.URL.Query().Get("back")), http.StatusSeeOther)
 			return
 		case "/theme":
 			mode := r.URL.Query().Get("mode")

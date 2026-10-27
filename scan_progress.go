@@ -114,7 +114,7 @@ func scanProgressNow() scanProgress {
 }
 
 func scanPageHTML() string {
-	return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+	return translateHTML(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <title>扫描中 · diskmon</title>
 <style>body{background:#0e1116;color:#e7ebf2;font:15px/1.8 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;padding:60px;max-width:760px;margin:0 auto}
 a{color:#4c8dff;text-decoration:none}
@@ -139,7 +139,7 @@ function tick(){
   }).catch(function(){});
 }
 setInterval(tick,1000); tick();
-</script></body></html>`
+</script></body></html>`)
 }
 
 var _ = fmt.Sprintf

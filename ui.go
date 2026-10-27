@@ -84,6 +84,11 @@ func navBar(active string) string {
 	}
 	b.WriteString(`<span style="flex:1"></span>`)
 	b.WriteString(`<a href="/export" title="导出 CSV">导出</a>`)
+	if isEN() {
+		b.WriteString(`<a href="/lang?to=zh" title="切换到中文">中文</a>`)
+	} else {
+		b.WriteString(`<a href="/lang?to=en" title="Switch to English">EN</a>`)
+	}
 	if currentTheme() == "light" {
 		b.WriteString(`<a href="/theme?mode=dark" title="切换到暗色">🌙 暗色</a>`)
 	} else {
@@ -102,11 +107,12 @@ func appShell(title, active, body string) string {
 	if active == "clean" {
 		body = cleanTabs(cleanTabOf(title)) + body
 	}
-	return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+	html := `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>` + htmlEscape(title) + ` · diskmon</title>
 <link rel="icon" href="/favicon.ico">
 <style>` + css + navCSS + themeCSS() + `</style></head><body><div class="wrap">` + navBar(active) + dataDirBanner() + muteBanner() + body + uiJS + `</div></body></html>`
+	return translateHTML(html)
 }
 
 // ---------- 今日建议 ----------
@@ -132,6 +138,15 @@ func todaySuggestion(cfg Config, st *Store) suggestion {
 		}
 	}
 	if bestFree > 0 {
+		if isEN() {
+			return suggestion{
+				Title:  "Enable an auto-clean rule",
+				Why:    fmt.Sprintf("Dry-run for \"%s\" shows %s reclaimable. Once enabled it runs daily; run a dry-run first if unsure.", bestRule, human(bestFree)),
+				Href:   "/rules",
+				Action: "Review & enable",
+				Extra:  "all cleanups are undoable (7 days)",
+			}
+		}
 		return suggestion{
 			Title:  "确认一条规则，常驻自动清理",
 			Why:    fmt.Sprintf("自动清理「%s」试运行显示可释放 %s。确认启用后，它会按天自动处理；不放心可以先点「立即试运行」再决定。", bestRule, human(bestFree)),
@@ -142,6 +157,15 @@ func todaySuggestion(cfg Config, st *Store) suggestion {
 	}
 	// 2) 保守方案
 	if p := buildPlan(cfg, st, "conservative"); len(p.Dirs) > 0 {
+		if isEN() {
+			return suggestion{
+				Title:  "Start with a conservative cleanup",
+				Why:    fmt.Sprintf("The conservative preset reclaims %s (%d folders: temp, dev cache, update cache, logs). Undoable for 7 days.", human(p.Bytes), len(p.Dirs)),
+				Href:   "/plan/preview?key=conservative",
+				Action: "Preview & clean",
+				Extra:  fmt.Sprintf("standard %s · aggressive %s", human(buildPlan(cfg, st, "standard").Bytes), human(buildPlan(cfg, st, "aggressive").Bytes)),
+			}
+		}
 		return suggestion{
 			Title:  "先做保守清理",
 			Why:    fmt.Sprintf("保守方案能回收 %s（%d 个目录，全部是可清类：临时文件/开发缓存/更新缓存/日志）。执行后 7 天内可还原。", human(p.Bytes), len(p.Dirs)),
@@ -152,6 +176,14 @@ func todaySuggestion(cfg Config, st *Store) suggestion {
 	}
 	// 3) 重复文件
 	if r := loadDups(cfg); r != nil && r.TotalWasted > 0 {
+		if isEN() {
+			return suggestion{
+				Title:  "Handle duplicate files",
+				Why:    fmt.Sprintf("Last scan found %d duplicate groups, %s reclaimable. One copy is kept per group.", len(r.Groups), human(r.TotalWasted)),
+				Href:   "/dup",
+				Action: "Review duplicates",
+			}
+		}
 		return suggestion{
 			Title:  "处理重复文件",
 			Why:    fmt.Sprintf("上次扫描发现 %d 组重复，可释放 %s。每组保留第一份，其余进隔离区。", len(r.Groups), human(r.TotalWasted)),
@@ -160,6 +192,14 @@ func todaySuggestion(cfg Config, st *Store) suggestion {
 		}
 	}
 	// 4) 兜底
+	if isEN() {
+		return suggestion{
+			Title:  "Scan once to get data",
+			Why:    "No scan yet. A full scan takes about 1–2 minutes; after that categories, presets and trends have numbers.",
+			Href:   "/scan",
+			Action: "Start scan",
+		}
+	}
 	return suggestion{
 		Title:  "先扫一遍拿到数据",
 		Why:    "还没有扫描结果。全盘扫描约 100 秒，之后分类、方案、趋势都会有数字。",
@@ -190,20 +230,39 @@ func overviewPage(cfg Config, st *Store) string {
 		color, pct, pct, pct))
 	b.WriteString(`<div>`)
 	b.WriteString(fmt.Sprintf(`<div style="font-size:26px;font-weight:700">%s <span class="muted" style="font-size:13px">剩余</span></div>`, human(v.Free)))
-	b.WriteString(fmt.Sprintf(`<div class="muted">总容量 %s · 已用 %s</div>`, human(v.Total), human(v.Total-v.Free)))
+	if isEN() {
+		b.WriteString(fmt.Sprintf(`<div class="muted">Total %s · used %s</div>`, human(v.Total), human(v.Total-v.Free)))
+	} else {
+		b.WriteString(fmt.Sprintf(`<div class="muted">总容量 %s · 已用 %s</div>`, human(v.Total), human(v.Total-v.Free)))
+	}
 	b.WriteString(fmt.Sprintf(`<div style="margin-top:8px"><span class="pill" style="background:%s22;color:%s;border:1px solid %s55">%s</span></div>`, color, color, color, levelText(level)))
 	if sc := st.GetScan(); sc != nil {
-		b.WriteString(fmt.Sprintf(`<div class="muted" style="margin-top:10px">上次扫描 %s · %d 文件 · 耗时 %ds</div>`,
-			time.Unix(sc.TS, 0).Format("01-02 15:04"), sc.Files, int(sc.Duration)))
+		if isEN() {
+			b.WriteString(fmt.Sprintf(`<div class="muted" style="margin-top:10px">Last scan %s · %d files · took %ds</div>`,
+				time.Unix(sc.TS, 0).Format("01-02 15:04"), sc.Files, int(sc.Duration)))
+		} else {
+			b.WriteString(fmt.Sprintf(`<div class="muted" style="margin-top:10px">上次扫描 %s · %d 文件 · 耗时 %ds</div>`,
+				time.Unix(sc.TS, 0).Format("01-02 15:04"), sc.Files, int(sc.Duration)))
+		}
 	}
 	if sc2 := st.GetScan(); sc2 != nil {
 		src := "全量扫描"
-		if sc2.Source == "incremental" {
-			src = fmt.Sprintf("增量扫描（复用 %d 个子树，重扫 %d 个）", sc2.ReusedChildren, sc2.ScannedChildren)
-		} else if sc2.Source == "cached" {
-			src = "缓存（上次扫描后无写入）"
+		if isEN() {
+			src = "full scan"
+			if sc2.Source == "incremental" {
+				src = fmt.Sprintf("incremental scan (%d subtrees reused, %d rescanned)", sc2.ReusedChildren, sc2.ScannedChildren)
+			} else if sc2.Source == "cached" {
+				src = "cached (no writes since last scan)"
+			}
+			b.WriteString(`<div class="muted" style="margin-top:6px">Source: ` + src + `</div>`)
+		} else {
+			if sc2.Source == "incremental" {
+				src = fmt.Sprintf("增量扫描（复用 %d 个子树，重扫 %d 个）", sc2.ReusedChildren, sc2.ScannedChildren)
+			} else if sc2.Source == "cached" {
+				src = "缓存（上次扫描后无写入）"
+			}
+			b.WriteString(`<div class="muted" style="margin-top:6px">数据来源：` + src + `</div>`)
 		}
-		b.WriteString(`<div class="muted" style="margin-top:6px">数据来源：` + src + `</div>`)
 	}
 	b.WriteString(`<div style="margin-top:14px"><a class="btn" href="/scan">重新扫描</a><a class="btn" href="/scan?full=1">强制全扫</a></div>`)
 	b.WriteString(`</div></div></div>`)

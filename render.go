@@ -477,7 +477,7 @@ func renderPage(cfg Config, st *Store) string {
 	b.WriteString("<li>mtime 回溯反映「仍留在盘上的新增内容」，真实净增长需累积几天采样。</li>")
 	b.WriteString("</ul></div>")
 	b.WriteString("<footer>diskmon-go · 单文件版 · 只读监测</footer></div>`+uiJS+`</body></html>")
-	return b.String()
+	return translateHTML(b.String())
 }
 
 func svgRing(pct float64, color string, usedGB, totalGB, freeGB float64) string {

@@ -33,7 +33,7 @@ needs three confirmations.
 | Safety | quarantine (7 days, size cap), whitelist/blocklist, dry-run first, undo |
 | Ops | single 8 MB exe, tray, `/api/health`, watchdog, signed builds |
 | Export | CSV for dirs / files / apps / duplicates / media / alerts / quarantine |
-| UI | 6 top-level pages, cleanup tabs, every table sortable + searchable, path inspection |
+| UI | 6 top-level pages, cleanup tabs, every table sortable + searchable, path inspection, English/Chinese UI |
 
 ## Quick start
 
