@@ -1,17 +1,30 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func mkScan(dirs ...DirEntry) *Scan { return &Scan{Deep: dirs} }
 
 func TestBuildPlanTiers(t *testing.T) {
+	root := t.TempDir()
+	mk := func(parts ...string) string {
+		p := root
+		for _, s := range parts {
+			p = filepath.Join(p, s)
+		}
+		_ = os.MkdirAll(p, 0o755)
+		return p
+	}
 	st := &Store{}
 	st.st.Scan = mkScan(
-		DirEntry{Path: `C:\Temp\a`, Bytes: 500 << 20, Cat: "temp"},                    // clean
-		DirEntry{Path: `C:\Users\x\AppData\Local\Chrome\Cache`, Bytes: 400 << 20, Cat: "browser"}, // confirm
-		DirEntry{Path: `C:\Users\x\AppData\Roaming\Tencent`, Bytes: 900 << 20, Cat: "comms_media"}, // confirm
-		DirEntry{Path: `C:\Windows\WinSxS`, Bytes: 900 << 20, Cat: "system_winsxs"},   // adjust：永不允许
-		DirEntry{Path: `C:\Small\tmp`, Bytes: 10 << 20, Cat: "temp"},                  // 太小
+		DirEntry{Path: mk("Temp", "a"), Bytes: 500 << 20, Cat: "temp"},                    // clean
+		DirEntry{Path: mk("Users", "x", "AppData", "Local", "Chrome", "Cache"), Bytes: 400 << 20, Cat: "browser"}, // confirm
+		DirEntry{Path: mk("Users", "x", "AppData", "Roaming", "Tencent"), Bytes: 900 << 20, Cat: "comms_media"}, // confirm
+		DirEntry{Path: mk("Windows", "WinSxS"), Bytes: 900 << 20, Cat: "system_winsxs"},   // adjust：永不允许
+		DirEntry{Path: mk("Small", "tmp"), Bytes: 10 << 20, Cat: "temp"},                  // 太小
 	)
 	cfg := Config{Whitelist: nil, QuarantineDays: 7, QuarantineMaxGB: 20}
 

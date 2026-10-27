@@ -3,6 +3,15 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.5.5
+
+- "计划 974 MB，实际 2 MB" explained and reduced:
+  * plans now drop folders that no longer exist (stale scan snapshot used to keep showing them);
+  * the lazy-clean page samples each folder and shows how many files are in use
+    (e.g. "100% (60/60)") with a warning to close running programs first;
+  * the result page explains that skipped files are locked by running programs.
+- Fixed two brittle tests (one hard-coded a date, one used fake paths).
+
 ## 2.5.4
 
 - Added the quarantine page (/q), which used to 404 even though "去隔离区" linked to it:

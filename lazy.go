@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"syscall"
 	"strings"
 	"sync"
 	"time"
@@ -225,15 +228,31 @@ func lazyPage(cfg Config, st *Store) string {
 	b.WriteString(fmt.Sprintf(`<div class="kpi"><div><span class="big">%s</span><span class="unit"> 预计释放 · %d 个目录</span></div></div>`,
 		human(p.Bytes), len(p.Dirs)))
 	b.WriteString(`<div class="muted" style="margin:-4px 0 10px">这个数字来自上次扫描；正在被占用的文件会被跳过，所以实际释放可能略少。清理完成后会显示「计划 vs 实际」。</div>`)
-	b.WriteString(`<table><tr><th>目录</th><th style="text-align:right">大小</th></tr>`)
+	b.WriteString(`<table><tr><th>目录</th><th style="text-align:right">大小</th><th>占用情况（抽样）</th></tr>`)
+	highLock := 0
 	for i, d := range p.Dirs {
 		if i >= 12 {
-			b.WriteString(fmt.Sprintf(enFormat(`<tr><td colspan="2" class="muted">… 另外 %d 个</td></tr>`, `<tr><td colspan="2" class="muted">… plus %d more</td></tr>`), len(p.Dirs)-12))
+			b.WriteString(fmt.Sprintf(enFormat(`<tr><td colspan="3" class="muted">… 另外 %d 个</td></tr>`, `<tr><td colspan="3" class="muted">… plus %d more</td></tr>`), len(p.Dirs)-12))
 			break
 		}
-		b.WriteString(fmt.Sprintf(`<tr><td><code>%s</code></td><td class="r">%s</td></tr>`, htmlEscape(d.Path), human(d.Bytes)))
+		locked, total := sampleLocked(d.Path)
+		occ := ""
+		if total > 0 {
+			pct := locked * 100 / total
+			occ = fmt.Sprintf("%d%%（%d/%d）", pct, locked, total)
+			if pct >= 50 {
+				occ = `<span style="color:#f5a524">` + occ + `</span>`
+				highLock++
+			}
+		} else {
+			occ = "—"
+		}
+		b.WriteString(fmt.Sprintf(`<tr><td><code>%s</code></td><td class="r">%s</td><td class="muted">%s</td></tr>`, htmlEscape(d.Path), human(d.Bytes), occ))
 	}
 	b.WriteString(`</table>`)
+	if highLock > 0 {
+		b.WriteString(`<div class="warn" style="margin-top:10px">有 ` + fmt.Sprintf("%d", highLock) + ` 个目录里大部分文件正被程序占用，清理时会被跳过——那部分空间这次腾不出来。关掉正在用的程序（浏览器、聊天工具等）后再清理，效果会明显更好。</div>`)
+	}
 	b.WriteString(`<div style="margin-top:16px"><a class="btn" style="background:#1f6f4a;border-color:#33c179;font-size:15px;padding:11px 22px" href="/lazy/start">开始清理（可撤销）</a>`)
 	b.WriteString(`<a class="btn" href="/clean">看其它清理方式</a></div>`)
 
@@ -253,6 +272,9 @@ func lazyPage(cfg Config, st *Store) string {
 			b.WriteString(`<details style="margin-top:8px"><summary class="muted" style="cursor:pointer">看计划 / 实际明细</summary>`)
 			b.WriteString(lazyResultsTable(s.Results))
 			b.WriteString(`</details>`)
+		}
+		if s.SkippedFiles > 0 {
+			b.WriteString(fmt.Sprintf(`<div class="muted" style="margin-top:6px">跳过的 %d 个文件是因为它们正被程序使用（占用中无法移动）。关闭相关程序后重新清理，通常能移走更多。</div>`, s.SkippedFiles))
 		}
 		if len(s.IDs) > 0 {
 			b.WriteString(`<a class="btn" style="border-color:#f5486a;color:#ff8fa3" href="/lazy/undo">一键撤销上一次清理</a>`)
@@ -297,4 +319,30 @@ func lazyClearIDs() {
 	lazyMu.Lock()
 	lazyCur.IDs = nil
 	lazyMu.Unlock()
+}
+
+// sampleLocked 抽样判断目录里有多少文件正被占用（打不开 = 被占用）
+func sampleLocked(root string) (locked, total int) {
+	deadline := time.Now().Add(350 * time.Millisecond)
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if time.Now().After(deadline) || total >= 60 {
+			return filepath.SkipAll
+		}
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		total++
+		p16, e := syscall.UTF16PtrFromString(p)
+		if e != nil {
+			return nil
+		}
+		h, e := syscall.CreateFile(p16, syscall.GENERIC_READ, 0, nil, syscall.OPEN_EXISTING, syscall.FILE_ATTRIBUTE_NORMAL, 0)
+		if e != nil {
+			locked++
+			return nil
+		}
+		_ = syscall.CloseHandle(h)
+		return nil
+	})
+	return locked, total
 }

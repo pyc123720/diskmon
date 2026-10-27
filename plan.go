@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"net/url"
 	"strings"
 )
@@ -93,6 +94,9 @@ func buildPlan(cfg Config, st *Store, key string) Plan {
 		}
 		if blocked || deniedForCleanup(d.Path) {
 			continue
+		}
+		if _, err := os.Stat(d.Path); err != nil {
+			continue // 扫描后已被清掉/移走，计划里不再呈现
 		}
 		p.Dirs = append(p.Dirs, d)
 	}
