@@ -849,8 +849,15 @@ func serveHTTP(cfg Config, st *Store) {
 			return
 		case "/trend":
 			_, _ = w.Write([]byte(trendPage(cfg, st)))
-		default:
+		case "/":
 			_, _ = w.Write([]byte(overviewPage(cfg, st)))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			msg := `<div class="warn">页面不存在</div><a class="btn" href="/">回总览</a>`
+			if isEN() {
+				msg = `<div class="warn">Page not found</div><a class="btn" href="/">Back to overview</a>`
+			}
+			_, _ = w.Write([]byte(appShell("404", "", msg)))
 		}
 	})
 	srv := &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", cfg.Port), Handler: mux}

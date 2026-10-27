@@ -25,7 +25,12 @@ func TestLangFromRequest(t *testing.T) {
 	r4.AddCookie(&http.Cookie{Name: langCookie, Value: "zh"})
 	r4.Header.Set("Accept-Language", "en")
 	if got := langFromRequest(r4); got != "zh" {
-		t.Fatalf("cookie 优先，实际 %s", got)
+		t.Fatalf("cookie 优先于浏览器语言，实际 %s", got)
+	}
+	r5 := httptest.NewRequest("GET", "/?lang=en", nil)
+	r5.AddCookie(&http.Cookie{Name: langCookie, Value: "zh"})
+	if got := langFromRequest(r5); got != "en" {
+		t.Fatalf("显式 ?lang= 应覆盖 cookie，实际 %s", got)
 	}
 }
 

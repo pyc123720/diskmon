@@ -137,6 +137,9 @@ func mcpCallTool(cfg Config, st *Store, name string, args map[string]interface{}
 			return nil, fmt.Errorf("path 不能为空")
 		}
 		p = expandPath(p)
+		if st, err := os.Stat(p); err != nil || st == nil {
+			return nil, fmt.Errorf("路径不存在或不可读：%s", p)
+		}
 		r := rehearseQuick(cfg, p, 3*time.Second)
 		meta := cats[r.Cat]
 		return map[string]interface{}{

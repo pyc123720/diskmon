@@ -17,6 +17,13 @@ func init() { curLang.Store("zh") }
 const langCookie = "diskmon_lang"
 
 func langFromRequest(r *http.Request) string {
+	// 显式 ?lang= 优先（方便分享英文链接），其次 cookie，最后浏览器语言
+	switch r.URL.Query().Get("lang") {
+	case "en":
+		return "en"
+	case "zh":
+		return "zh"
+	}
 	if c, err := r.Cookie(langCookie); err == nil {
 		if c.Value == "en" {
 			return "en"
@@ -24,9 +31,6 @@ func langFromRequest(r *http.Request) string {
 		if c.Value == "zh" {
 			return "zh"
 		}
-	}
-	if r.URL.Query().Get("lang") == "en" {
-		return "en"
 	}
 	if strings.HasPrefix(strings.ToLower(r.Header.Get("Accept-Language")), "en") {
 		return "en"
