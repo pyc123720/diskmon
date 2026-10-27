@@ -3,6 +3,22 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.5.0
+
+- A folder whose name looks like a cache (Cache / Temp / Logs / GPUCache / Code Cache) is now
+  judged as "safe to delete, rebuilt automatically" even when its parent app is a confirm-tier app,
+  so "Chrome Cache" no longer reads as "do not delete the whole folder".
+
+- Path inspection is now a guided walkthrough instead of a number dump:
+  1. a plain-language verdict (safe to delete / do not delete / do not delete as a whole) plus what
+     the folder actually is and what happens if it is removed;
+  2. what is inside: file types with a one-line explanation and advice per type (database, config,
+     program files, logs, media ...), and the largest files;
+  3. child folders with their own classification and per-folder "Inspect" / "Clean this" actions
+     (cache-like names are flagged);
+  4. how to verify it yourself (open the folder, sort by size, official in-app cleanup paths);
+  5. next steps: open folder in Explorer (/reveal), preview & quarantine, or clean a single cache child.
+
 ## 2.4.5
 
 - The lazy-clean card stays on the overview after a cleanup: it used to disappear once nothing

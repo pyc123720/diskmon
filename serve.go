@@ -721,6 +721,14 @@ func serveHTTP(cfg Config, st *Store) {
 			}
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
+		case "/reveal":
+			p := r.URL.Query().Get("path")
+			if p != "" && (len(p) > 3 && p[1] == ':') {
+				cmd := exec.Command("explorer.exe", p)
+				_ = cmd.Start()
+			}
+			http.Redirect(w, r, "/inspect?path="+urlQuery(p), http.StatusSeeOther)
+			return
 		case "/lang":
 			to := r.URL.Query().Get("to")
 			if to != "en" {
