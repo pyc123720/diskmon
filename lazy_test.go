@@ -65,3 +65,68 @@ func TestLazyRunAndUndo(t *testing.T) {
 		t.Fatalf("重复撤销应为 0，实际 %d", n2)
 	}
 }
+
+
+func TestDedupeNested(t *testing.T) {
+	dirs := []DirEntry{
+		{Path: `C:\Users\x\AppData\Local\Temp`, Bytes: 100},
+		{Path: `C:\Users\x\AppData\Local\Temp\nested`, Bytes: 50},
+		{Path: `C:\Users\x\AppData\Local\Temp2`, Bytes: 30},
+	}
+	got := dedupeNested(dirs)
+	if len(got) != 2 {
+		t.Fatalf("应去掉被父目录覆盖的子目录，实际 %d 个：%+v", len(got), got)
+	}
+	for _, d := range got {
+		if d.Path == `C:\Users\x\AppData\Local\Temp\nested` {
+			t.Fatal("子目录不应保留")
+		}
+	}
+}
+
+func TestMoveFilesIndividually(t *testing.T) {
+	base, err := os.MkdirTemp(".", "move-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(base)
+	src := filepath.Join(base, "src")
+	dst := filepath.Join(base, "dst")
+	for _, d := range []string{"a", "b/c", "locked"} {
+		if err := os.MkdirAll(filepath.Join(src, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string]int{"a/1.bin": 100, "b/c/2.bin": 200, "top.bin": 50}
+	for rel, size := range files {
+		if err := os.WriteFile(filepath.Join(src, rel), make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var lastFiles int
+	moved, n, skipped, err := moveFilesIndividually(src, dst, func(m uint64, f, s int, cur string) { lastFiles = f })
+	if err != nil {
+		t.Fatalf("移动失败: %v", err)
+	}
+	if n != 3 || skipped != 0 || moved != 350 {
+		t.Fatalf("移动统计不对: moved=%d files=%d skipped=%d", moved, n, skipped)
+	}
+	if lastFiles == 0 {
+		t.Fatal("进度回调没有被调用")
+	}
+	if _, err := os.Stat(filepath.Join(dst, "b", "c", "2.bin")); err != nil {
+		t.Fatal("子目录结构应保留")
+	}
+
+	// 合并还原：原目录已存在时应能放回去
+	if err := os.MkdirAll(filepath.Join(src, "a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rfiles, rbytes, rskip, rerr := restoreInto(dst, src)
+	if rerr != nil || rfiles == 0 || rbytes == 0 {
+		t.Fatalf("合并还原失败: files=%d bytes=%d skip=%d err=%v", rfiles, rbytes, rskip, rerr)
+	}
+	if _, err := os.Stat(filepath.Join(src, "top.bin")); err != nil {
+		t.Fatal("文件应还原到原目录")
+	}
+}

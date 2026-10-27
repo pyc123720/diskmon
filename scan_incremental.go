@@ -28,6 +28,8 @@ type scanCache struct {
 var procSession = fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
 
 var (
+	usnLastPoll atomic.Int64 // 最近一次 USN 轮询完成时间（UnixMilli）
+
 	dirtyMu       sync.Mutex
 	dirtyChildren = map[string]time.Time{}
 	dirtyAll      bool
@@ -141,11 +143,20 @@ func ScanRootCached(cfg Config, forceFull bool) (*Scan, string) {
 		return scanVolume(cfg, cfg.Root), "full"
 	}
 	cache := loadScanCache(cfg)
-	dirty, all := dirtySnapshot()
 	useCache := !forceFull && cache != nil && strings.EqualFold(cache.Root, cfg.Root) &&
-		cache.Session == procSession && usnActive.Load() && !all &&
+		cache.Session == procSession && usnActive.Load() &&
 		time.Since(time.Unix(cache.TS, 0)) < 6*time.Hour &&
 		time.Since(time.Unix(cache.FullTS, 0)) < 24*time.Hour
+	if useCache {
+		// 扫描前必须等一次"扫描开始之后"的 USN 轮询：
+		// 否则刚改动的文件还没进脏集合，会被误判为没变。
+		waitUSNPoll(3*time.Second, 8*time.Second)
+	}
+	scanStart := time.Now()
+	dirty, all := dirtySnapshot()
+	if all {
+		useCache = false
+	}
 
 	parts := make([]*Scan, 0, len(children))
 	newChildren := map[string]*Scan{}
@@ -206,7 +217,32 @@ func ScanRootCached(cfg Config, forceFull bool) (*Scan, string) {
 			Root: cfg.Root, TS: time.Now().Unix(), FullTS: fullTS,
 			Session: procSession, Children: newChildren,
 		})
-		clearDirty()
+		clearDirtyBefore(scanStart)
 	}
 	return merged, merged.Source
+}
+
+// waitUSNPoll 等待一次晚于当前时刻的 USN 轮询完成（最多 max 秒）。
+func waitUSNPoll(interval, max time.Duration) {
+	deadline := time.Now().Add(max)
+	for time.Now().Before(deadline) {
+		last := time.UnixMilli(usnLastPoll.Load())
+		if !last.IsZero() && time.Since(last) < interval {
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+}
+
+// clearDirtyBefore 只清除扫描开始前的脏标记，扫描期间的新事件保留
+func clearDirtyBefore(ts time.Time) {
+	dirtyMu.Lock()
+	defer dirtyMu.Unlock()
+	cut := ts.Unix()
+	for k, v := range dirtyChildren {
+		if v.Unix() <= cut {
+			delete(dirtyChildren, k)
+		}
+	}
+	dirtyAll = false
 }

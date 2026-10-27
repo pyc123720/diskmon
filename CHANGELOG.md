@@ -3,6 +3,19 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.4.4
+
+- Lazy clean no longer silently moves less than advertised: if a whole-folder move fails because
+  files are in use, it now moves the remaining files one by one, skips locked ones, and reports
+  "计划 X → 实际 Y（跳过 N 个占用中的文件）" with a per-folder details table.
+- Overlapping folders (parent + child) are de-duplicated in plans, so the estimate is not counted twice.
+- Global action pill in the nav: scanning or cleaning progress is visible on every page, so leaving
+  the progress page no longer feels like losing the operation.
+- Lazy clean progress is now byte-based (moved / planned) with live file count and skipped count.
+- Fix: incremental scan could reuse stale data for changes made right before the scan (dirty markers
+  arrive only on the next USN poll). It now waits for a fresh poll before reusing subtrees, and only
+  clears dirty markers recorded before the scan started.
+
 ## 2.4.2
 
 - Scan progress page redesigned to feel responsive rather than stuck: live file counter with

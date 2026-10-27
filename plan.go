@@ -95,9 +95,31 @@ func buildPlan(cfg Config, st *Store, key string) Plan {
 			continue
 		}
 		p.Dirs = append(p.Dirs, d)
+	}
+	p.Dirs = dedupeNested(p.Dirs)
+	for _, d := range p.Dirs {
 		p.Bytes += d.Bytes
 	}
 	return p
+}
+
+// dedupeNested 去掉被父目录覆盖的子目录，避免"计划里算两遍、实际只移一次"
+func dedupeNested(dirs []DirEntry) []DirEntry {
+	out := make([]DirEntry, 0, len(dirs))
+	for _, d := range dirs {
+		covered := false
+		for _, k := range out {
+			kp := strings.ToLower(strings.TrimRight(k.Path, `\`)) + `\`
+			if strings.HasPrefix(strings.ToLower(strings.TrimRight(d.Path, `\`))+`\`, kp) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 func allPlans(cfg Config, st *Store) []Plan {

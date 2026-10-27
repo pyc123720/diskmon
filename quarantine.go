@@ -26,6 +26,7 @@ type QEntry struct {
 	Files    int    `json:"files"`
 	TS       int64  `json:"ts"`
 	Reason   string `json:"reason"`
+	Skipped  int    `json:"skipped,omitempty"` // 逐文件移动时被占用而跳过的文件数
 	Restored bool   `json:"restored"`
 }
 
@@ -292,6 +293,11 @@ func newID() string {
 
 // 执行隔离：移动而不是删除；同卷 rename，跨卷 copy+delete
 func (q *Quarantine) apply(cfg Config, path, reason string) (QEntry, error) {
+	return q.applyWithProgress(cfg, path, reason, nil)
+}
+
+// applyWithProgress 与 apply 相同，但会回报移动进度（逐文件兜底时用于显示进度）
+func (q *Quarantine) applyWithProgress(cfg Config, path, reason string, onFile func(moved uint64, files, skipped int, cur string)) (QEntry, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -308,11 +314,19 @@ func (q *Quarantine) apply(cfg Config, path, reason string) (QEntry, error) {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return QEntry{}, err
 	}
+	bytesMoved, filesMoved, skipped := r.Bytes, r.Files, 0
 	if err := movePath(path, dest); err != nil {
-		return QEntry{}, err
+		// 目录里有正在被占用的文件时，整目录 rename 会失败。
+		// 逐个文件移动：能移的先移走，占用中的跳过并如实计数。
+		b2, f2, s2, ferr := moveFilesIndividually(path, dest, onFile)
+		if ferr != nil {
+			return QEntry{}, ferr
+		}
+		bytesMoved, filesMoved, skipped = b2, f2, s2
+		pruneEmptyDirs(path, path)
 	}
-	e := QEntry{ID: id, Original: path, Stored: dest, Bytes: r.Bytes, Files: r.Files,
-		TS: time.Now().Unix(), Reason: reason}
+	e := QEntry{ID: id, Original: path, Stored: dest, Bytes: bytesMoved, Files: filesMoved,
+		TS: time.Now().Unix(), Reason: reason, Skipped: skipped}
 	// 元数据随条目落盘：即使 index.jsonl 损坏，也能靠它重建
 	if b, err := json.Marshal(e); err == nil {
 		_ = writeFileAtomic(filepath.Join(q.root, id, metaFileName), b)
@@ -425,7 +439,21 @@ func (q *Quarantine) restore(id string) (QEntry, error) {
 			continue
 		}
 		if _, err := os.Stat(e.Original); err == nil {
-			return e, fmt.Errorf("原路径已存在，拒绝覆盖：%s", e.Original)
+			// 原目录仍在（说明只移走了一部分文件）：合并还原，不覆盖已有文件
+			files, _, skipped, err := restoreInto(e.Stored, e.Original)
+			if err != nil || files == 0 {
+				if err == nil {
+					err = fmt.Errorf("原路径已存在且没有可还原的文件：%s", e.Original)
+				}
+				return e, err
+			}
+			_ = os.RemoveAll(e.Stored)
+			e.Restored = true
+			e.Skipped = skipped
+			list[i].Restored = true
+			q.rewrite(list)
+			pruneEmptyDirs(filepath.Dir(e.Stored), q.root)
+			return e, nil
 		}
 		if err := os.MkdirAll(filepath.Dir(e.Original), 0o755); err != nil {
 			return e, err
@@ -610,4 +638,151 @@ func pruneEmptyDirs(dir, stop string) {
 		}
 		dir = filepath.Dir(dir)
 	}
+}
+
+// moveFilesIndividually 把目录内容移进隔离区。
+// 先尝试整棵子树 rename（快），失败的子项才逐文件移动（跳过占用中的文件）。
+func moveFilesIndividually(src, dst string, onFile func(moved uint64, files, skipped int, cur string)) (uint64, int, int, error) {
+	var moved uint64
+	files, skipped := 0, 0
+	report := func(cur string) {
+		if onFile != nil {
+			onFile(moved, files, skipped, cur)
+		}
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	for _, e := range entries {
+		child := filepath.Join(src, e.Name())
+		target := filepath.Join(dst, e.Name())
+		if e.IsDir() {
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				skipped++
+				continue
+			}
+			if err := os.Rename(child, target); err == nil {
+				size, cnt := dirStats(target)
+				moved += size
+				files += cnt
+				report(child)
+				continue
+			}
+			// 子树里有文件被占用：逐文件搬
+			walkErr := filepath.WalkDir(child, func(p string, d os.DirEntry, err error) error {
+				if err != nil || d.IsDir() {
+					return nil
+				}
+				rel, rerr := filepath.Rel(src, p)
+				if rerr != nil {
+					skipped++
+					return nil
+				}
+				t := filepath.Join(dst, rel)
+				if err := os.MkdirAll(filepath.Dir(t), 0o755); err != nil {
+					skipped++
+					return nil
+				}
+				if err := os.Rename(p, t); err != nil {
+					if err := copyFile(p, t); err != nil {
+						skipped++
+						return nil
+					}
+					_ = os.Remove(p)
+				}
+				if info, err := os.Stat(t); err == nil {
+					moved += uint64(info.Size())
+				}
+				files++
+				if files%25 == 0 {
+					report(p)
+				}
+				return nil
+			})
+			if walkErr != nil {
+				return moved, files, skipped, walkErr
+			}
+			report(child)
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			skipped++
+			continue
+		}
+		if err := os.Rename(child, target); err != nil {
+			if err := copyFile(child, target); err != nil {
+				skipped++
+				continue
+			}
+			_ = os.Remove(child)
+		}
+		if info, err := os.Stat(target); err == nil {
+			moved += uint64(info.Size())
+		}
+		files++
+		if files%25 == 0 {
+			report(child)
+		}
+	}
+	if files == 0 {
+		return 0, 0, skipped, fmt.Errorf("所有文件都被占用，无法移动（%d 个跳过）", skipped)
+	}
+	return moved, files, skipped, nil
+}
+
+// dirStats 统计目录大小与文件数（用于子树 rename 后记账）
+func dirStats(root string) (uint64, int) {
+	var bytes uint64
+	var n int
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			bytes += uint64(info.Size())
+			n++
+		}
+		return nil
+	})
+	return bytes, n
+}
+
+// restoreInto 把隔离区里的文件合并回已存在的目录，不覆盖同名文件。
+func restoreInto(stored, original string) (int, uint64, int, error) {
+	var files int
+	var bytes uint64
+	skipped := 0
+	err := filepath.WalkDir(stored, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		rel, rerr := filepath.Rel(stored, p)
+		if rerr != nil {
+			skipped++
+			return nil
+		}
+		target := filepath.Join(original, rel)
+		if _, err := os.Stat(target); err == nil {
+			skipped++ // 目标已存在：保留现场，不覆盖
+			return nil
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			skipped++
+			return nil
+		}
+		if err := os.Rename(p, target); err != nil {
+			if err := copyFile(p, target); err != nil {
+				skipped++
+				return nil
+			}
+			_ = os.Remove(p)
+		}
+		if info, err := os.Stat(target); err == nil {
+			bytes += uint64(info.Size())
+		}
+		files++
+		return nil
+	})
+	return files, bytes, skipped, err
 }

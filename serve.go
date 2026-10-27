@@ -132,6 +132,7 @@ func usnLoop(cfg Config, st *Store, tailer *UsnTailer, threshold uint64) error {
 			continue
 		}
 		recs, dirs, events, err := tailer.PollWithErr(8 << 20)
+		usnLastPoll.Store(time.Now().UnixMilli())
 		if recs > 0 {
 			usnSeq.Add(int64(recs))
 		}
@@ -649,6 +650,22 @@ func serveHTTP(cfg Config, st *Store) {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			b, _ := json.Marshal(scanProgressNow())
 			_, _ = w.Write(b)
+			return
+		}
+		if r.URL.Path == "/api/actions" {
+			sp := scanProgressNow()
+			ls := lazyState()
+			payload := map[string]interface{}{
+				"scan": map[string]interface{}{"running": sp.Running, "pct": sp.Pct, "files": sp.Files, "eta": sp.ETA},
+				"lazy": map[string]interface{}{
+					"running": ls.Running, "done": ls.Done, "total": ls.Total,
+					"planned": ls.Planned, "freed": ls.Freed, "failed": ls.Failed,
+					"files": ls.Files, "skipped_files": ls.SkippedFiles, "current": ls.Current,
+					"finished": ls.Finished.Unix(), "error": ls.Err,
+				},
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(payload)
 			return
 		}
 		if r.URL.Path == "/api/status" {

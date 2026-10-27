@@ -83,7 +83,7 @@ func navBar(active string) string {
 		}
 		b.WriteString(fmt.Sprintf(`<a href="%s"%s>%s%s</a>`, it.Href, cls, dot, it.Label))
 	}
-	b.WriteString(`<span style="flex:1"></span>`)
+	b.WriteString(`<span style="flex:1"></span><span id="actbar" style="display:flex;gap:6px;align-items:center;margin-right:8px"></span>`)
 	b.WriteString(`<a href="/export" title="导出 CSV">导出</a>`)
 	if isEN() {
 		b.WriteString(`<a href="/lang?to=zh" title="切换到中文">中文</a>`)
@@ -633,6 +633,31 @@ const uiJS = `<script>
     })(tables[i]);
   }
 })();
+
+// ---- 全局动作条：扫描 / 清理进行中时，在任何页面都能看到 ----
+function actPill(href, text, color, bg){
+  return '<a href="'+href+'" style="text-decoration:none;font-size:12px;line-height:1;padding:6px 10px;border-radius:999px;border:1px solid '+color+'55;background:'+bg+';color:'+color+'">'+text+'</a>';
+}
+function actTick(){
+  var el = document.getElementById('actbar');
+  if(!el) return;
+  fetch('/api/actions').then(function(r){return r.json()}).then(function(a){
+    var h = '';
+    if(a.scan && a.scan.running){
+      h += actPill('/scan', '● 扫描中 ' + Math.round(a.scan.pct||0) + '%', '#8ff0b8', '#173327');
+    }
+    if(a.lazy && a.lazy.running){
+      var gb = ((a.lazy.freed||0)/1073741824).toFixed(1);
+      var pg = ((a.lazy.planned||0)/1073741824).toFixed(1);
+      h += actPill('/lazy', '● 清理中 ' + gb + ' / ' + pg + ' GB', '#ffd08a', '#332a17');
+    } else if(a.lazy && a.lazy.finished && (Date.now()/1000 - a.lazy.finished) < 120 && a.lazy.freed > 0){
+      var gb = (a.lazy.freed/1073741824).toFixed(1);
+      h += actPill('/lazy', '✓ 清理完成 ' + gb + ' GB', '#8ff0b8', '#173327');
+    }
+    el.innerHTML = h;
+  }).catch(function(){});
+}
+actTick(); setInterval(actTick, 1500);
 </script>`
 
 func themeCSS() string {
