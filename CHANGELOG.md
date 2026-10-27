@@ -3,6 +3,12 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.4.1
+
+- The capacity card showed a hardcoded "系统盘 C:" even when the scan root is another drive; it now uses the actual drive letter.
+- When a scan exists but no safe-tier folder qualifies, the overview said "no scan yet"; it now says the scan is complete and nothing safe needs cleaning.
+- README screenshots (synthetic demo data) and CONTRIBUTING added.
+
 ## 2.4.0
 
 First public release.
