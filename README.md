@@ -72,6 +72,29 @@ Put `diskmon-go.exe` anywhere and run it. It starts in the tray; open the dashbo
 Release binaries are self-signed today; [docs/SIGNING.md](docs/SIGNING.md) documents the
 free SignPath Foundation path for publicly trusted signing.
 
+## Download and verify
+
+Grab diskmon-go.exe (or the portable zip) from the
+[latest release](https://github.com/pyc123720/diskmon/releases/latest). Every release also ships
+SHA256SUMS.txt:
+
+`powershell
+Get-FileHash .\diskmon-go.exe -Algorithm SHA256
+# compare with the line in SHA256SUMS.txt from the same release page
+`
+
+**SmartScreen:** builds are self-signed for now, so Windows may show "Unknown publisher".
+Choose *More info -> Run anyway*, or build from source (one command, see below) if you prefer.
+A publicly trusted signature is prepared for ([docs/SIGNING.md](docs/SIGNING.md)) once the project
+has real users.
+
+### Scoop
+
+`powershell
+scoop bucket add pyc https://github.com/pyc123720/scoop-bucket
+scoop install diskmon
+`
+
 ## Build from source
 
 Requirements: Windows 10/11, Go 1.27+, no third-party dependencies.
