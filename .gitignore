@@ -1,0 +1,25 @@
+# build output
+*.exe
+dist/
+release/
+installer/payload/*
+!installer/payload/.gitkeep
+
+# runtime data
+data/
+*.log
+*.tmp
+.tmp/
+
+# local dev-only scripts and personal notes
+dev/
+docs/HISTORY-zh.md
+
+# signing secrets
+*.pfx
+pfx-password.txt
+
+# OS junk
+Thumbs.db
+.DS_Store
+desktop.ini

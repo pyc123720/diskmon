@@ -1,0 +1,33 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet
+        run: go vet .
+
+      - name: Test
+        run: go test . -count=1
+
+      - name: Build
+        run: go build -trimpath -ldflags "-H windowsgui -s -w" -o diskmon-go.exe .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: diskmon-windows-amd64
+          path: diskmon-go.exe
+          if-no-files-found: error
