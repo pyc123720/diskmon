@@ -689,6 +689,8 @@ func serveHTTP(cfg Config, st *Store) {
 			}
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
+		case "/inspect":
+			_, _ = w.Write([]byte(inspectPage(cfg, st, r.URL.Query().Get("path"))))
 		case "/settings":
 			_, _ = w.Write([]byte(settingsPage(getConfig(), r.URL.Query().Get("notice"))))
 		case "/settings/save":

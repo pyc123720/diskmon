@@ -28,7 +28,7 @@ needs three confirmations.
 | Cleanup | one-click "lazy clean", 3 tiers, per-app, per-folder, media-by-type, L2 rules |
 | Safety | quarantine (7 days, size cap), whitelist/blocklist, dry-run first, undo |
 | Ops | single 8 MB exe, tray, `/api/health`, watchdog, signed builds |
-| UI | 6 top-level pages, cleanup tabs, every table sortable + searchable |
+| UI | 6 top-level pages, cleanup tabs, every table sortable + searchable, path inspection |
 
 ## Quick start
 

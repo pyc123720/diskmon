@@ -3,6 +3,13 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 1.6.1
+
+- Path inspection (`/inspect`): paste any file/folder path to see size, file count,
+  category, cleanup tier, lock status, and whether it is eligible for cleanup.
+  Uses a 3-second budget and skips per-file lock checks on huge folders.
+- `%TEMP%` / `%USERPROFILE%` style environment variables are expanded in every path input.
+
 ## 1.5.0
 
 - Scan progress: live file/dir/GB counter, progress bar, cancellable (cancelled scans are not saved)

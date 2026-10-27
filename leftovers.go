@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -64,10 +65,19 @@ func queryUninstall() []uninstEntry {
 	return arr
 }
 
+var pctVarRe = regexp.MustCompile(`%([A-Za-z0-9_() .]+)%`)
+
+// expandPath 同时支持 %TEMP% 和 $env:TEMP 两种写法
 func expandPath(p string) string {
 	p = strings.TrimSpace(strings.Trim(p, `"`))
+	p = pctVarRe.ReplaceAllStringFunc(p, func(m string) string {
+		name := strings.Trim(m, "%")
+		if v := os.Getenv(name); v != "" {
+			return v
+		}
+		return m
+	})
 	p = os.ExpandEnv(p)
-	// %ProgramFiles% 在 64 位进程里是 Program Files，32 位路径单独处理
 	return strings.TrimRight(p, `\`)
 }
 

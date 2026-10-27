@@ -55,6 +55,7 @@ var navItems = []struct{ Label, Href, Key string }{
 	{"趋势", "/trend", "trend"},
 	{"详情", "/detail", "detail"},
 	{"规则", "/rules", "rules"},
+	{"体检", "/inspect", "inspect"},
 	{"设置", "/settings", "settings"},
 }
 
@@ -187,6 +188,12 @@ func overviewPage(cfg Config, st *Store) string {
 		b.WriteString(`<span class="muted" style="margin-left:10px">` + htmlEscape(sug.Extra) + `</span>`)
 	}
 	b.WriteString(`</div></div></div>`)
+
+	// 路径体检入口
+	b.WriteString(`<div class="card" style="margin-top:14px"><h2>路径体检</h2>
+<form method="get" action="/inspect" style="display:flex;gap:8px;flex-wrap:wrap">
+<input name="path" placeholder="粘贴一个路径，看看能不能清（不会删除）" style="flex:1;min-width:260px;padding:9px 12px;background:#1c212b;border:1px solid #2a3240;border-radius:10px;color:#e7ebf2">
+<button class="btn" type="submit" style="cursor:pointer">体检</button></form></div>`)
 
 	// 懒人清理
 	lp := lazyPreview(cfg, st)

@@ -32,7 +32,8 @@ type QEntry struct {
 const metaFileName = ".diskmon-meta.json"
 
 type Rehearsal struct {
-	Path     string
+	Path      string
+	Truncated bool
 	Files    int
 	Bytes    uint64
 	Locked   []string
@@ -222,6 +223,64 @@ func rehearse(cfg Config, path string) Rehearsal {
 	for _, t := range top {
 		r.TopFiles = append(r.TopFiles, FileEntry{Path: t.p, Bytes: t.b, MTime: t.t})
 	}
+	return r
+}
+
+// rehearseQuick 用于"路径体检"：有 3 秒预算，不逐文件做锁检测，避免大目录卡住页面
+func rehearseQuick(cfg Config, path string, budget time.Duration) Rehearsal {
+	r := Rehearsal{Path: path, Truncated: true}
+	cat, tier, refuse := guardPath(cfg, path)
+	r.Cat, r.Tier = cat, tier
+	if refuse != "" {
+		r.Refuse = refuse
+		return r
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		r.Refuse = "路径不存在或不可读：" + err.Error()
+		return r
+	}
+	if !st.IsDir() {
+		r.Truncated = false
+		r.Files = 1
+		r.Bytes = uint64(st.Size())
+		if isLocked(path) {
+			r.Locked = append(r.Locked, path)
+		}
+		return r
+	}
+	deadline := time.Now().Add(budget)
+	lockChecks := 0
+	_ = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
+		if time.Now().After(deadline) {
+			return filepath.SkipAll
+		}
+		if err != nil {
+			r.Skipped++
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, e := d.Info()
+		if e != nil {
+			r.Skipped++
+			return nil
+		}
+		r.Files++
+		r.Bytes += uint64(info.Size())
+		if lockChecks < 200 {
+			lockChecks++
+			if isLocked(p) && len(r.Locked) < 10 {
+				r.Locked = append(r.Locked, p)
+			}
+		}
+		return nil
+	})
+	r.Truncated = time.Now().After(deadline)
 	return r
 }
 
