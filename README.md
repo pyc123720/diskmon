@@ -23,7 +23,7 @@ needs three confirmations.
 
 | Area | What you get |
 |---|---|
-| Monitoring | free space, 3-level thresholds, daily auto-scan, growth forecast with confidence range, live scan progress (cancellable) |
+| Monitoring | free space, 3-level thresholds, daily auto-scan, growth forecast, live scan progress (cancellable), 3-way parallel scan, instant rescan when nothing changed |
 | Attribution | USN journal (1 s), per-process write I/O (approx.), jump vs leak detection |
 | Analysis | 20 categories, treemap, snapshot diff (vs last / 7 days ago), app aggregation |
 | Media split | images / video / documents / audio / archives / programs, per folder |

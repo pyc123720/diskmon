@@ -77,10 +77,12 @@ func watchLoop(cfg Config, st *Store) {
 				break
 			}
 			st.SetEngine("usn", true)
+			usnActive.Store(true)
 			logf("engine: USN (elevated, attempt %d)", attempt)
 			if err := usnLoop(cfg, st, tailer, threshold); err == nil {
 				return
 			} else {
+				usnActive.Store(false)
 				inc(&usnRestarts)
 				logf("USN 中断（%d/3）：%v", attempt, err)
 				st.AddAlert("engine", fmt.Sprintf("USN 中断，第 %d 次重试：%v", attempt, err))
@@ -129,6 +131,9 @@ func usnLoop(cfg Config, st *Store, tailer *UsnTailer, threshold uint64) error {
 			continue
 		}
 		recs, dirs, events, err := tailer.PollWithErr(8 << 20)
+		if recs > 0 {
+			usnSeq.Add(int64(recs))
+		}
 		if err != nil {
 			usnErrStreak++
 			if usnErrStreak >= 10 {

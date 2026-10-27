@@ -13,13 +13,16 @@ type scanState struct {
 	mu      sync.Mutex
 	running bool
 	root    string
-	files   int
-	dirs    int
-	bytes   uint64
 	errs    int
 	started time.Time
 	cancel  atomic.Bool
 }
+
+var (
+	scanFilesCnt atomic.Int64
+	scanDirsCnt  atomic.Int64
+	scanBytesCnt atomic.Uint64
+)
 
 var scanProg scanState
 
@@ -27,8 +30,10 @@ func scanBegin(root string) {
 	scanProg.mu.Lock()
 	scanProg.running = true
 	scanProg.root = root
-	scanProg.files, scanProg.dirs = 0, 0
-	scanProg.bytes, scanProg.errs = 0, 0
+	scanFilesCnt.Store(0)
+	scanDirsCnt.Store(0)
+	scanBytesCnt.Store(0)
+	scanProg.errs = 0
 	scanProg.started = time.Now()
 	scanProg.cancel.Store(false)
 	scanProg.mu.Unlock()
@@ -40,10 +45,17 @@ func scanEnd() {
 	scanProg.mu.Unlock()
 }
 
-func scanTick(files, dirs int, bytes uint64) {
-	scanProg.mu.Lock()
-	scanProg.files, scanProg.dirs, scanProg.bytes = files, dirs, bytes
-	scanProg.mu.Unlock()
+// scanAdd 累加进度（并行扫描时多个 worker 同时调用）
+func scanAdd(files, dirs int, bytes uint64) {
+	if files != 0 {
+		scanFilesCnt.Add(int64(files))
+	}
+	if dirs != 0 {
+		scanDirsCnt.Add(int64(dirs))
+	}
+	if bytes != 0 {
+		scanBytesCnt.Add(bytes)
+	}
 }
 
 func scanError() {
@@ -80,9 +92,9 @@ func scanProgressNow() scanProgress {
 	p := scanProgress{
 		Running: scanProg.running,
 		Root:    scanProg.root,
-		Files:   scanProg.files,
-		Dirs:    scanProg.dirs,
-		Bytes:   scanProg.bytes,
+		Files:   int(scanFilesCnt.Load()),
+		Dirs:    int(scanDirsCnt.Load()),
+		Bytes:   scanBytesCnt.Load(),
 		Errors:  scanProg.errs,
 	}
 	if !scanProg.started.IsZero() {

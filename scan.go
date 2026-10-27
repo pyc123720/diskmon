@@ -220,9 +220,7 @@ func scanVolume(cfg Config, root string) *Scan {
 				return fs.SkipDir // 不把自己算进去
 			}
 			sc.Dirs++
-			if sc.Dirs%200 == 0 {
-				scanTick(sc.Files, sc.Dirs, sc.Total)
-			}
+			scanAdd(0, 1, 0)
 			dirCat[path] = classify(strings.ToLower(path) + `\`)
 			return nil
 		}
@@ -234,9 +232,7 @@ func scanVolume(cfg Config, root string) *Scan {
 			return nil
 		}
 		seen++
-		if seen%500 == 0 {
-			scanTick(sc.Files, sc.Dirs, sc.Total)
-		}
+		scanAdd(1, 0, size)
 		if seen%2000 == 0 && scanCancelled() {
 			return fs.SkipAll
 		}
@@ -311,7 +307,8 @@ func scanVolume(cfg Config, root string) *Scan {
 	}
 	var d3, d4 []kv
 	for k, v := range nodes {
-		depth := strings.Count(k, `\`) - strings.Count(root, `\`)
+		// 绝对层级：并行分块扫描时每块 root 不同，用绝对深度保证语义一致
+		depth := strings.Count(strings.TrimRight(k, `\`), `\`) - 1
 		if depth == 3 {
 			d3 = append(d3, kv{k, v})
 		} else if depth == 4 && v >= 64<<20 {
@@ -344,11 +341,19 @@ func scanVolume(cfg Config, root string) *Scan {
 }
 
 func runScan(cfg Config, st *Store) *Scan {
+	// 无变更秒回：上次扫描后没有任何写入，直接复用结果
+	if last := st.GetScan(); last != nil && last.Root == cfg.Root && usnActive.Load() && usnEventsSince(last.TS) == 0 && time.Since(time.Unix(last.TS, 0)) < 6*time.Hour {
+		fmt.Println("自上次扫描后没有任何写入，跳过扫描")
+		st.AddAlert("scan", "自上次扫描后没有任何写入，已复用上次结果")
+		return last
+	}
 	scanBegin(cfg.Root)
 	defer scanEnd()
-	fmt.Printf("扫描 %s（只读）…\n", cfg.Root)
-	sc := scanVolume(cfg, cfg.Root)
+	started := time.Now()
+	fmt.Printf("扫描 %s（只读，并行）…\n", cfg.Root)
+	sc := scanRootParallel(cfg)
 	sc.Root = cfg.Root
+	sc.Duration = time.Since(started).Seconds()
 	if scanCancelled() {
 		st.AddAlert("scan", "扫描已取消，结果未保存")
 		return sc
@@ -357,6 +362,7 @@ func runScan(cfg Config, st *Store) *Scan {
 	sc.Used, sc.Free = vol.Used, vol.Free
 	st.SetScan(sc)
 	appendSnapshot(cfg, sc)
+	usnMark()
 	fmt.Printf("完成：%d 文件 / %d 目录，合计 %s，耗时 %.1fs，跳过 %d 处\n",
 		sc.Files, sc.Dirs, human(sc.Total), sc.Duration, sc.Errors)
 	for i := 0; i < len(sc.Dirs3) && i < 6; i++ {

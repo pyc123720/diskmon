@@ -3,6 +3,15 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.0.0
+
+- Parallel scan: top-level subtrees are scanned by 3 workers and merged.
+  Full C: scan on the reference machine went from ~107 s to ~60 s.
+- Instant rescan: when the USN tailer has seen no writes since the last scan, `scan` returns
+  the cached result immediately (0.1 s) instead of walking the disk again.
+- Fixed folder paths missing a separator when scanning subtrees, and depth semantics
+  (`dirs3` / `deep`) that had shifted for subtasks.
+
 ## 1.9.2
 
 Security / robustness fixes found by an explicit test pass:
