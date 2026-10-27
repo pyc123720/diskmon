@@ -1,5 +1,9 @@
 # diskmon（磁盘监测）
 
+[![build](https://github.com/pyc123720/diskmon/actions/workflows/build.yml/badge.svg)](https://github.com/pyc123720/diskmon/actions/workflows/build.yml)
+[![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+![platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue.svg)
+
 一个常驻托盘的 Windows 小工具，回答三个问题：
 
 - **C 盘的空间去哪了？** —— 目录占用、20 类分类、Treemap
@@ -62,7 +66,8 @@
 安装器内嵌 app exe，因此需要先生成 `installer/payload/`；`build.ps1 -Installer` 会自动处理
 （自签名证书可选）。
 
-CI：`.github/workflows/build.yml` 在 `windows-latest` 上跑 `go vet`、`go test` 并构建 exe。
+测试：`go test ./...` —— 20 个用例（隔离区、规则守卫、扫描进度、懒人清理、安全）。
+CI 在 `windows-latest` 上跑 `go vet`、`go test` 和构建。
 
 ## 命令行
 

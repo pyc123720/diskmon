@@ -1,5 +1,9 @@
 # diskmon
 
+[![build](https://github.com/pyc123720/diskmon/actions/workflows/build.yml/badge.svg)](https://github.com/pyc123720/diskmon/actions/workflows/build.yml)
+[![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+![platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue.svg)
+
 A tray-resident Windows disk monitor that answers three questions:
 
 - **What is eating my C: drive?** — per-folder sizes, 20 categories, treemap
@@ -63,7 +67,8 @@ Requirements: Windows 10/11, Go 1.27+, no third-party dependencies.
 The installer embeds a pre-built exe, so it needs `installer/payload/` to be populated first —
 `build.ps1 -Installer` does that automatically (a self-signed `.cer` is optional).
 
-CI: `.github/workflows/build.yml` runs `go vet`, `go test`, and builds the exe on `windows-latest`.
+Tests: `go test ./...` — 20 cases (quarantine, rule guard, scan progress, lazy clean, security).
+CI runs `go vet`, `go test` and the build on `windows-latest`.
 
 ## Command line
 
