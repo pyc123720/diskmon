@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -192,6 +193,22 @@ func todaySuggestion(cfg Config, st *Store) suggestion {
 		}
 	}
 	// 4) 兜底
+	if sc := st.GetScan(); sc != nil {
+		if isEN() {
+			return suggestion{
+				Title:  "Scan complete - nothing safe to clean",
+				Why:    fmt.Sprintf("Scanned %d files. No safe-tier folders above the threshold; keep monitoring for growth.", sc.Files),
+				Href:   "/detail/clean",
+				Action: "See breakdown",
+			}
+		}
+		return suggestion{
+			Title:  "扫描完成，暂无可安全清理的目录",
+			Why:    fmt.Sprintf("已扫描 %d 个文件，可清类目录都在阈值以下；继续观察增长即可。", sc.Files),
+			Href:   "/detail/clean",
+			Action: "看分类明细",
+		}
+	}
 	if isEN() {
 		return suggestion{
 			Title:  "Scan once to get data",
@@ -225,7 +242,15 @@ func overviewPage(cfg Config, st *Store) string {
 	b.WriteString(`<div class="grid g2">`)
 
 	// 左：容量环
-	b.WriteString(`<div class="card"><h2>系统盘 C:</h2><div class="ringwrap">`)
+	rootLabel := strings.ToUpper(strings.TrimRight(filepath.VolumeName(cfg.Root), `\`))
+	if rootLabel == "" {
+		rootLabel = "C:"
+	}
+	h2 := "系统盘 " + rootLabel
+	if isEN() {
+		h2 = "System drive " + rootLabel
+	}
+	b.WriteString(`<div class="card"><h2>` + h2 + `</h2><div class="ringwrap">`)
 	b.WriteString(fmt.Sprintf(`<div class="ring" style="background:conic-gradient(%s 0 %.1f%%, #232a36 %.1f%% 100%%)"><div class="inner"><div class="pct">%.1f%%</div><div class="lbl">已用</div></div></div>`,
 		color, pct, pct, pct))
 	b.WriteString(`<div>`)

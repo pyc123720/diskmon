@@ -19,6 +19,18 @@ needs three confirmations.
 
 [中文说明](README.zh-CN.md)
 
+## Screenshots
+
+| Overview (dark) | Cleanup sections |
+|---|---|
+| <img src="docs/screenshots/overview-zh.png" width="46%"> | ![sections](docs/screenshots/clean-zh.png) |
+
+| English UI | Lazy clean preview |
+|---|---|
+| ![english](docs/screenshots/overview-en.png) | ![lazy](docs/screenshots/lazy-zh.png) |
+
+> Screenshots use a synthetic demo folder (`E:\diskmon-demo`) so no personal paths are exposed.
+
 ## Features
 
 | Area | What you get |
