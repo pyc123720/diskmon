@@ -223,6 +223,7 @@ func overviewPage(cfg Config, st *Store) string {
 		b.WriteString(fmt.Sprintf(`<div><span class="big" style="font-size:26px;font-weight:700">%s</span> <span class="muted">可释放 · %d 个目录</span></div>`, human(lp.Bytes), len(lp.Dirs)))
 		b.WriteString(`<a class="btn" style="background:#1f6f4a;border-color:#33c179;padding:10px 20px" href="/lazy">一键清理（可撤销）</a>`)
 		b.WriteString(`<span class="muted">只清临时/开发缓存/更新缓存/日志，全部进隔离区</span>`)
+		b.WriteString(`<div class="muted" style="margin-top:6px">` + htmlEscape(lazyScheduleText(cfg)) + `</div>`)
 		b.WriteString(`</div></div>`)
 	}
 

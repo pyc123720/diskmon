@@ -25,7 +25,7 @@ needs three confirmations.
 | Media split | images / video / documents / audio / archives / programs, per folder |
 | Duplicates | two-stage hash, hardlink-aware, never touches install directories |
 | Leftovers | registry orphans + leftover app data, confidence-labelled |
-| Cleanup | one-click "lazy clean", 3 tiers, per-app, per-folder, media-by-type, L2 rules |
+| Cleanup | one-click "lazy clean" (manual or scheduled daily/weekly), 3 tiers, per-app, per-folder, media-by-type, L2 rules |
 | Safety | quarantine (7 days, size cap), whitelist/blocklist, dry-run first, undo |
 | Ops | single 8 MB exe, tray, `/api/health`, watchdog, signed builds |
 | Export | CSV for dirs / files / apps / duplicates / media / alerts / quarantine |

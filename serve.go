@@ -584,6 +584,7 @@ func serveHTTP(cfg Config, st *Store) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		inc(&httpReqs)
 		uiTheme.Store(themeFromRequest(r))
+		cfg = getConfig() // 每次请求都取最新配置，否则改设置后页面仍用启动时的快照
 		defer func() {
 			if rec := recover(); rec != nil {
 				inc(&httpPanics)

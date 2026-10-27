@@ -32,6 +32,8 @@ type Config struct {
 	AutoScanHours   int        `json:"auto_scan_hours"`
 	QuarantineMaxGB int        `json:"quarantine_max_gb"`
 	NotifyMinMB     int        `json:"notify_min_delta_mb"`
+	LazyAuto        string     `json:"lazy_auto"`       // off | daily | weekly
+	LazyAutoHour    int        `json:"lazy_auto_hour"`  // 0-23
 }
 
 func defaultConfig() Config {
@@ -49,6 +51,8 @@ func defaultConfig() Config {
 		AutoScanHours:  24,
 		QuarantineMaxGB: 20,
 		NotifyMinMB:     500,
+		LazyAuto:        "off",
+		LazyAutoHour:    3,
 	}
 }
 
@@ -95,6 +99,8 @@ func validateConfig(c *Config) {
 	if c.AutoScanHours < 0 || c.AutoScanHours > 720 { c.AutoScanHours = 24 }
 	if c.QuarantineMaxGB <= 0 || c.QuarantineMaxGB > 2000 { c.QuarantineMaxGB = 20 }
 	if c.NotifyMinMB < 0 || c.NotifyMinMB > 1000000 { c.NotifyMinMB = 500 }
+	if c.LazyAuto != "daily" && c.LazyAuto != "weekly" { c.LazyAuto = "off" }
+	if c.LazyAutoHour < 0 || c.LazyAutoHour > 23 { c.LazyAutoHour = 3 }
 	if c.WarnGB <= 0 { c.WarnGB = 20 }
 	if c.DangerGB <= 0 || c.DangerGB >= c.WarnGB { c.DangerGB = c.WarnGB / 2 }
 	if c.CriticalGB <= 0 || c.CriticalGB >= c.DangerGB { c.CriticalGB = c.DangerGB / 2 }

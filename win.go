@@ -524,6 +524,7 @@ func runTray(cfg Config, st *Store) {
 	go guard("rules", func() { rulesLoop(cfg, st) })
 	go guard("autoscan", func() { autoScanLoop(cfg, st) })
 	go guard("proc", func() { procLoop(cfg) })
+	go guard("lazyauto", func() { lazyAutoLoop(cfg, st) })
 	go func() {
 		for {
 			time.Sleep(30 * time.Second)

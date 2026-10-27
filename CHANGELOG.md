@@ -3,6 +3,13 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 1.9.1
+
+- Scheduled lazy clean: run the conservative tier automatically every day or every Sunday at a chosen hour
+  (`lazy_auto` / `lazy_auto_hour`, default off). Runs at most once per day, recorded as `lazy-auto`.
+- Fix: the HTTP handler used the config snapshot taken at startup, so pages kept showing old thresholds
+  after saving settings. Every request now refreshes the config.
+
 ## 1.8.0
 
 - UI consolidation: 20 detail section pages collapsed into 6 groups (capacity / trend / cats / files / clean / system);

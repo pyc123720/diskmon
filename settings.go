@@ -29,6 +29,18 @@ func settingsPage(cfg Config, notice string) string {
 	b.WriteString(fieldNum("增长告警阈值（MB / 5 秒）", "alert_min_delta_mb", cfg.AlertMinDeltaMB, 1, 1000000))
 	b.WriteString(fieldNum("每日自动扫描间隔（小时，0=关闭）", "auto_scan_hours", cfg.AutoScanHours, 0, 720))
 	b.WriteString(fieldNum("弹窗通知阈值（MB，低于只记录）", "notify_min_delta_mb", cfg.NotifyMinMB, 0, 1000000))
+	b.WriteString(fieldNum("自动懒人清理（小时，0–23）", "lazy_auto_hour", cfg.LazyAutoHour, 0, 23))
+	// 自动懒人清理
+	b.WriteString(`<div><div class="muted">自动懒人清理</div><select name="lazy_auto" style="width:100%;padding:8px;background:#1c212b;border:1px solid #2a3240;border-radius:8px;color:#e7ebf2">`)
+	opts := []struct{ v, l string }{{"off", "关闭"}, {"daily", "每天一次"}, {"weekly", "每周日一次"}}
+	for _, o := range opts {
+		sel := ""
+		if cfg.LazyAuto == o.v {
+			sel = " selected"
+		}
+		b.WriteString(`<option value="` + o.v + `"` + sel + `>` + o.l + `</option>`)
+	}
+	b.WriteString(`</select></div>`)
 	b.WriteString(`</div></div>`)
 
 	// 阈值
@@ -124,6 +136,15 @@ func saveSettingsFromForm(vals url.Values) (notice string, err error) {
 	next.AlertMinDeltaMB = atoi("alert_min_delta_mb", cur.AlertMinDeltaMB, 1, 1000000)
 	next.AutoScanHours = atoi("auto_scan_hours", cur.AutoScanHours, 0, 720)
 	next.NotifyMinMB = atoi("notify_min_delta_mb", cur.NotifyMinMB, 0, 1000000)
+	switch vals.Get("lazy_auto") {
+	case "daily":
+		next.LazyAuto = "daily"
+	case "weekly":
+		next.LazyAuto = "weekly"
+	default:
+		next.LazyAuto = "off"
+	}
+	next.LazyAutoHour = atoi("lazy_auto_hour", cur.LazyAutoHour, 0, 23)
 	next.QuarantineDays = atoi("quarantine_days", cur.QuarantineDays, 1, 365)
 	next.QuarantineMaxGB = atoi("quarantine_max_gb", cur.QuarantineMaxGB, 1, 2000)
 
