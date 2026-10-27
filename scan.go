@@ -233,6 +233,9 @@ func scanVolume(cfg Config, root string) *Scan {
 		}
 		seen++
 		scanAdd(1, 0, size)
+		if seen%40 == 0 {
+			scanTouch(path) // 进度页滚动显示当前文件
+		}
 		if seen%2000 == 0 && scanCancelled() {
 			return fs.SkipAll
 		}
@@ -349,6 +352,11 @@ func runScan(cfg Config, st *Store) *Scan {
 		cp.Source = "cached"
 		return &cp
 	}
+	exp := 0
+	if last := st.GetScan(); last != nil && last.Files > 0 {
+		exp = last.Files
+	}
+	scanExpected.Store(int64(exp))
 	scanBegin(cfg.Root)
 	defer scanEnd()
 	started := time.Now()

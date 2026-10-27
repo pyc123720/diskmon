@@ -3,6 +3,14 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.4.2
+
+- Scan progress page redesigned to feel responsive rather than stuck: live file counter with
+  smooth number animation, gradient bar with shimmer, scrolling current-file line, a rolling list
+  of recently scanned files, and live speed / elapsed / ETA.
+- Progress and ETA are now based on the previous scan's file count; the old byte-based percentage
+  jumped to ~43% in the first seconds and made the wait feel worse.
+
 ## 2.4.1
 
 - The capacity card showed a hardcoded "系统盘 C:" even when the scan root is another drive; it now uses the actual drive letter.
