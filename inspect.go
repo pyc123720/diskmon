@@ -7,28 +7,28 @@ import (
 	"strings"
 )
 
-// ---------- 路径体检 ----------
+// ---------- 查路径 ----------
 
 func inspectPage(cfg Config, st *Store, raw string) string {
 	var b strings.Builder
-	b.WriteString(`<h2 style="margin-top:0">路径体检</h2>`)
+	b.WriteString(`<h2 style="margin-top:0">查路径</h2>`)
 	b.WriteString(`<p class="muted">粘贴任意文件或文件夹路径，看看它占多大、属于哪类、能不能清、有没有被占用。不会删除任何东西。</p>`)
 
 	// 输入框（GET 提交，方便收藏）
 	b.WriteString(`<form method="get" action="/inspect" style="max-width:760px;margin-bottom:16px">
 <input name="path" value="` + htmlEscape(raw) + `" placeholder="C:\Users\...\AppData\Local\Temp 或 %TEMP%" style="width:100%;padding:11px 12px;background:#1c212b;border:1px solid #2a3240;border-radius:10px;color:#e7ebf2;font-size:14px">
-<div style="margin-top:10px"><button class="btn" type="submit" style="cursor:pointer;background:#1f6f4a;border-color:#33c179">体检</button>
+<div style="margin-top:10px"><button class="btn" type="submit" style="cursor:pointer;background:#1f6f4a;border-color:#33c179">查一下</button>
 <a class="btn" href="/inspect?path=%25TEMP%25">看 %TEMP%</a>
 <a class="btn" href="/inspect?path=` + urlQuery(os.Getenv("USERPROFILE")+`\\Downloads`) + `">看 Downloads</a></div></form>`)
 
 	if strings.TrimSpace(raw) == "" {
-		return appShell("路径体检", "inspect", b.String())
+		return appShell("查路径", "inspect", b.String())
 	}
 
 	path := expandPath(raw)
 	if path == "" {
 		b.WriteString(`<div class="warn">路径为空。</div>`)
-		return appShell("路径体检", "inspect", b.String())
+		return appShell("查路径", "inspect", b.String())
 	}
 	b.WriteString(`<div class="card"><h2><code>` + htmlEscape(path) + `</code></h2>`)
 
@@ -36,7 +36,7 @@ func inspectPage(cfg Config, st *Store, raw string) string {
 	if err != nil {
 		b.WriteString(`<div class="warn">路径不存在或不可读：` + htmlEscape(err.Error()) + `</div></div>`)
 		b.WriteString(`<a class="btn" href="/inspect">再试一个</a>`)
-		return appShell("路径体检", "inspect", b.String())
+		return appShell("查路径", "inspect", b.String())
 	}
 
 	r := rehearseQuick(cfg, path, 3*time.Second)
@@ -75,5 +75,5 @@ func inspectPage(cfg Config, st *Store, raw string) string {
 	}
 	b.WriteString(`</div>`)
 	b.WriteString(`<a class="btn" href="/inspect">再体检一个</a>`)
-	return appShell("路径体检", "inspect", b.String())
+	return appShell("查路径", "inspect", b.String())
 }

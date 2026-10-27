@@ -3,6 +3,15 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 1.8.0
+
+- UI consolidation: 20 detail section pages collapsed into 6 groups (capacity / trend / cats / files / clean / system);
+  old section URLs still work and map to their group.
+- Overview: six duplicate tiles replaced by three ordered actions (scan → lazy clean → check trend);
+  redundant "detail" entries removed (21 links → 15 on the overview).
+- Plain-language navigation: 规则 → 自动清理, 体检 → 查路径, 详情 → 全部数据.
+- Risk markers in the nav: green dot = read-only, amber dot = moves/deletes files.
+
 ## 1.7.0
 
 - Light theme with a nav toggle (cookie-persisted), full palette override

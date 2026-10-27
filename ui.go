@@ -62,9 +62,9 @@ var navItems = []struct{ Label, Href, Key string }{
 	{"总览", "/", "overview"},
 	{"清理", "/clean", "clean"},
 	{"趋势", "/trend", "trend"},
-	{"详情", "/detail", "detail"},
-	{"规则", "/rules", "rules"},
-	{"体检", "/inspect", "inspect"},
+	{"全部数据", "/detail", "detail"},
+	{"自动清理", "/rules", "rules"},
+	{"查路径", "/inspect", "inspect"},
 	{"设置", "/settings", "settings"},
 }
 
@@ -76,7 +76,11 @@ func navBar(active string) string {
 		if it.Key == active {
 			cls = ` class="on"`
 		}
-		b.WriteString(fmt.Sprintf(`<a href="%s"%s>%s</a>`, it.Href, cls, it.Label))
+		dot := `<span title="只读" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#33c179;margin-right:6px;vertical-align:middle"></span>`
+		if it.Key == "clean" || it.Key == "rules" {
+			dot = `<span title="会移动/删除文件" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f5a524;margin-right:6px;vertical-align:middle"></span>`
+		}
+		b.WriteString(fmt.Sprintf(`<a href="%s"%s>%s%s</a>`, it.Href, cls, dot, it.Label))
 	}
 	b.WriteString(`<span style="flex:1"></span>`)
 	b.WriteString(`<a href="/export" title="导出 CSV">导出</a>`)
@@ -85,7 +89,7 @@ func navBar(active string) string {
 	} else {
 		b.WriteString(`<a href="/theme?mode=light" title="切换到亮色">☀ 亮色</a>`)
 	}
-	b.WriteString(`<a href="/detail/overview" title="分区页">分区页</a><a href="/detail" title="全部数据">⤢ 全部</a></div>`)
+	b.WriteString(`</div>`)
 	return b.String()
 }
 
@@ -192,7 +196,7 @@ func overviewPage(cfg Config, st *Store) string {
 		b.WriteString(fmt.Sprintf(`<div class="muted" style="margin-top:10px">上次扫描 %s · %d 文件 · 耗时 %ds</div>`,
 			time.Unix(sc.TS, 0).Format("01-02 15:04"), sc.Files, int(sc.Duration)))
 	}
-	b.WriteString(`<div style="margin-top:14px"><a class="btn" href="/scan">重新扫描</a><a class="btn" href="/detail">全部数据</a></div>`)
+	b.WriteString(`<div style="margin-top:14px"><a class="btn" href="/scan">重新扫描</a></div>`)
 	b.WriteString(`</div></div></div>`)
 
 	// 右：今日建议
@@ -222,18 +226,15 @@ func overviewPage(cfg Config, st *Store) string {
 		b.WriteString(`</div></div>`)
 	}
 
-	// 快捷入口
-	b.WriteString(`<div class="tiles">`)
-	tiles := []struct{ T, D, H string }{
-		{"清理中心", "一键方案 · 按应用 · 隔离区", "/clean"},
-		{"增长与趋势", "预测、每日增量、对比上次", "/trend"},
-		{"重复文件", "200 组待处理时可回收 7 GB+", "/dup"},
-		{"自动规则", "阈值 + 天数 + 执行窗口", "/rules"},
-		{"卸载残留", "注册表孤立 + 数据残留", "/leftovers"},
-		{"全部数据", "分类、Treemap、目录、文件", "/detail"},
+	// 三个主动作
+	b.WriteString(`<div class="tiles" style="grid-template-columns:repeat(3,minmax(0,1fr))">`)
+	actions := []struct{ T, D, H string }{
+		{"① 扫描一次", "拿到数据，约 1–2 分钟（只读）", "/scan"},
+		{"② 懒人清理", "只清可清类，随时撤销", "/lazy"},
+		{"③ 看趋势", "谁在涨、多久装满", "/trend"},
 	}
-	for _, t := range tiles {
-		b.WriteString(fmt.Sprintf(`<a class="tile" href="%s"><div class="t">%s</div><div class="d">%s</div></a>`, t.H, t.T, t.D))
+	for _, a := range actions {
+		b.WriteString(fmt.Sprintf(`<a class="tile" href="%s"><div class="t">%s</div><div class="d">%s</div></a>`, a.H, a.T, a.D))
 	}
 	b.WriteString(`</div>`)
 

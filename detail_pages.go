@@ -2,39 +2,31 @@ package main
 
 import "strings"
 
-// ---------- 详情分区页（B 方案） ----------
-//
-// 只保留一份渲染真相：/detail 整体渲染，分区页从它的 HTML 里按 id 切出对应子树。
-// 好处是不存在"两套页面代码"，不会出现详情改了、分区页没改；代价是服务端仍渲染整页（~10ms）。
+// ---------- 详情分区页（收敛为 6 组） ----------
 
 type sectionDef struct {
 	Key   string
 	Label string
-	ID    string
+	IDs   []string
 	Desc  string
 }
 
 var sectionDefs = []sectionDef{
-	{"overview", "容量", "overview", "容量环与多盘余量"},
-	{"forecast", "预测", "forecast", "写满预测与投影"},
-	{"daily", "每日", "daily", "每日新增柱状图"},
-	{"anomaly", "性质", "anomaly", "跳变 vs 泄漏判定"},
-	{"cats", "分类", "cats", "分类占用与可删占比"},
-	{"treemap", "Treemap", "treemap", "空间分布"},
-	{"diff", "对比", "diff", "与上次/一周前对比"},
-	{"risks", "风险卡", "risks", "可回收项与后果"},
-	{"quarantine", "隔离区", "quarantine", "可还原的隔离项"},
-	{"plans", "方案", "plans", "一键清理三档"},
-	{"rules", "规则", "rules", "自动清理规则状态"},
-	{"apps", "应用", "apps", "按应用聚合"},
-	{"procs", "进程", "procs", "写入热点进程"},
-	{"dup", "重复", "dup", "重复文件摘要"},
-	{"leftovers", "残留", "leftovers", "卸载残留摘要"},
-	{"dirs", "目录", "dirs", "目录排行"},
-	{"files", "大文件", "files", "Top 大文件"},
-	{"engine", "引擎", "engine", "引擎与自占内存"},
-	{"alerts", "告警", "alerts", "最近告警"},
-	{"tools", "工具", "tools", "系统工具入口"},
+	{"capacity", "容量", []string{"overview"}, "容量环、多盘余量"},
+	{"trend", "趋势", []string{"forecast", "daily", "anomaly", "diff"}, "预测、每日增长、性质、对比"},
+	{"cats", "分类", []string{"cats", "treemap"}, "分类占用与 Treemap"},
+	{"files", "文件", []string{"dirs", "files"}, "目录排行与大文件"},
+	{"clean", "清理", []string{"plans", "risks", "quarantine", "apps", "dup", "leftovers", "procs"}, "方案、风险卡、隔离区、应用、重复、残留、进程"},
+	{"system", "系统", []string{"engine", "alerts", "tools"}, "引擎、告警、系统工具"},
+}
+
+// 旧分区 key → 新的组（保持旧链接可用）
+var legacySection = map[string]string{
+	"overview": "capacity",
+	"forecast": "trend", "daily": "trend", "anomaly": "trend", "diff": "trend",
+	"risks": "clean", "quarantine": "clean", "plans": "clean", "rules": "clean",
+	"apps": "clean", "procs": "clean", "dup": "clean", "leftovers": "clean",
+	"engine": "system", "alerts": "system", "tools": "system",
 }
 
 func sectionByKey(key string) (sectionDef, bool) {
@@ -93,28 +85,38 @@ func sidebarHTML(active string) string {
 }
 
 func sectionPage(cfg Config, st *Store, key string) (string, bool) {
+	if to, ok := legacySection[key]; ok {
+		key = to
+	}
 	def, ok := sectionByKey(key)
 	if !ok {
 		return "", false
 	}
 	full := renderPage(cfg, st)
-	frag, ok := sliceSection(full, def.ID)
-	if !ok {
+	var body strings.Builder
+	found := 0
+	for _, id := range def.IDs {
+		if frag, ok := sliceSection(full, id); ok {
+			body.WriteString(frag)
+			found++
+		}
+	}
+	if found == 0 {
 		return "", false
 	}
 	var b strings.Builder
 	b.WriteString(`<div class="withside">`)
 	b.WriteString(sidebarHTML(key))
-	b.WriteString(`<div>` + frag)
+	b.WriteString(`<div>` + body.String())
 	b.WriteString(`<div style="margin-top:14px"><a class="btn" href="/detail">全部数据</a>`)
 	switch def.Key {
-	case "plans", "quarantine", "dup", "leftovers", "apps":
+	case "clean":
 		b.WriteString(`<a class="btn" href="/clean">去清理中心</a>`)
-	case "forecast", "daily", "anomaly", "diff":
-		b.WriteString(`<a class="btn" href="/trend">去趋势页</a>`)
-	case "rules":
-		b.WriteString(`<a class="btn" href="/rules">去规则页</a>`)
+	case "trend":
+		b.WriteString(`<a class="btn" href="/trend">趋势专页</a>`)
+	case "files":
+		b.WriteString(`<a class="btn" href="/export?what=files">导出大文件 CSV</a>`)
 	}
 	b.WriteString(`</div></div></div>`)
-	return appShell(def.Label+" · 详情", "detail", b.String()), true
+	return appShell(def.Label+" · 全部数据", "detail", b.String()), true
 }
