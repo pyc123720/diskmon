@@ -83,6 +83,7 @@ func watchLoop(cfg Config, st *Store) {
 				return
 			} else {
 				usnActive.Store(false)
+				markDirty(cfg.Root, cfg.Root, true) // 断流=可能漏事件，让缓存全部失效
 				inc(&usnRestarts)
 				logf("USN 中断（%d/3）：%v", attempt, err)
 				st.AddAlert("engine", fmt.Sprintf("USN 中断，第 %d 次重试：%v", attempt, err))
@@ -133,6 +134,9 @@ func usnLoop(cfg Config, st *Store, tailer *UsnTailer, threshold uint64) error {
 		recs, dirs, events, err := tailer.PollWithErr(8 << 20)
 		if recs > 0 {
 			usnSeq.Add(int64(recs))
+		}
+		for _, ev := range events {
+			markDirty(cfg.Root, ev.Path, strings.Contains(strings.ToUpper(ev.Reason), "RENAME"))
 		}
 		if err != nil {
 			usnErrStreak++
@@ -627,6 +631,9 @@ func serveHTTP(cfg Config, st *Store) {
 			return
 		}
 		if r.URL.Path == "/scan" {
+			if r.URL.Query().Get("full") == "1" {
+				scanForceFull.Store(true)
+			}
 			startScanAsync(cfg, st)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write([]byte(scanPageHTML()))

@@ -345,13 +345,17 @@ func runScan(cfg Config, st *Store) *Scan {
 	if last := st.GetScan(); last != nil && last.Root == cfg.Root && usnActive.Load() && usnEventsSince(last.TS) == 0 && time.Since(time.Unix(last.TS, 0)) < 6*time.Hour {
 		fmt.Println("自上次扫描后没有任何写入，跳过扫描")
 		st.AddAlert("scan", "自上次扫描后没有任何写入，已复用上次结果")
-		return last
+		cp := *last
+		cp.Source = "cached"
+		return &cp
 	}
 	scanBegin(cfg.Root)
 	defer scanEnd()
 	started := time.Now()
 	fmt.Printf("扫描 %s（只读，并行）…\n", cfg.Root)
-	sc := scanRootParallel(cfg)
+	forceFull := scanForceFull.Swap(false)
+	sc, src := ScanRootCached(cfg, forceFull)
+	sc.Source = src
 	sc.Root = cfg.Root
 	sc.Duration = time.Since(started).Seconds()
 	if scanCancelled() {

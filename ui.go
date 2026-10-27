@@ -196,7 +196,16 @@ func overviewPage(cfg Config, st *Store) string {
 		b.WriteString(fmt.Sprintf(`<div class="muted" style="margin-top:10px">上次扫描 %s · %d 文件 · 耗时 %ds</div>`,
 			time.Unix(sc.TS, 0).Format("01-02 15:04"), sc.Files, int(sc.Duration)))
 	}
-	b.WriteString(`<div style="margin-top:14px"><a class="btn" href="/scan">重新扫描</a></div>`)
+	if sc2 := st.GetScan(); sc2 != nil {
+		src := "全量扫描"
+		if sc2.Source == "incremental" {
+			src = fmt.Sprintf("增量扫描（复用 %d 个子树，重扫 %d 个）", sc2.ReusedChildren, sc2.ScannedChildren)
+		} else if sc2.Source == "cached" {
+			src = "缓存（上次扫描后无写入）"
+		}
+		b.WriteString(`<div class="muted" style="margin-top:6px">数据来源：` + src + `</div>`)
+	}
+	b.WriteString(`<div style="margin-top:14px"><a class="btn" href="/scan">重新扫描</a><a class="btn" href="/scan?full=1">强制全扫</a></div>`)
 	b.WriteString(`</div></div></div>`)
 
 	// 右：今日建议

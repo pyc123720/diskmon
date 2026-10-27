@@ -174,6 +174,9 @@ type FileEntry struct {
 
 type Scan struct {
 	Root     string            `json:"root"`
+	Source   string            `json:"source"` // full / incremental / cached
+	ReusedChildren  int        `json:"reused_children"`
+	ScannedChildren int        `json:"scanned_children"`
 	TS       int64             `json:"ts"`
 	Total    uint64            `json:"total"`
 	Files    int               `json:"files"`

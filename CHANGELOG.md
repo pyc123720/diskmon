@@ -3,6 +3,15 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.1.0
+
+- Incremental scanning (clean-subtree reuse): top-level subtrees with no USN events since the
+  last scan are reused; dirty subtrees are rescanned in parallel and merged.
+  Reference run: full scan 100 s → incremental 2.1 s (12 of 13 subtrees reused).
+- Safety rails: cache is bound to the process session, invalidated on USN gaps/renames,
+  expires after 6 h, and a full scan is forced every 24 h for reconciliation.
+  UI shows the data source and offers "force full scan" (`/scan?full=1`).
+
 ## 2.0.0
 
 - Parallel scan: top-level subtrees are scanned by 3 workers and merged.
