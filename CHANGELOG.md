@@ -3,6 +3,16 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 1.9.2
+
+Security / robustness fixes found by an explicit test pass:
+
+- Fixed open redirect in `/theme?back=` (now only same-site paths; `//evil.example` rejected)
+- Fixed `/media/dir?dir=...` accepting arbitrary paths: only folders from the media scan are allowed
+  (previously `/media/dir?dir=C:\` walked the whole drive and blocked the request for minutes)
+- CSV export now neutralises formula injection (`=`, `+`, `-`, `@` prefixes get a leading `'`)
+- Added tests: dangerous rule roots refused, CSV cells, redirect targets, rehearsal budget
+
 ## 1.9.1
 
 - Scheduled lazy clean: run the conservative tier automatically every day or every Sunday at a chosen hour

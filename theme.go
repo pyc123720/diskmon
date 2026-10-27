@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
 
@@ -65,3 +66,14 @@ th[style],td[style]{color:inherit}
 .nav .brand{color:#111827!important}
 
 `
+
+// safeBack 只允许站内相对路径，挡住 //evil.com 之类的开放重定向
+func safeBack(ref string) string {
+	if ref == "" || !strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, "//") {
+		return "/"
+	}
+	if strings.ContainsRune(ref, 92) || strings.Contains(ref, ":") {
+		return "/"
+	}
+	return ref
+}

@@ -42,8 +42,11 @@ func writeCSV(w http.ResponseWriter, name string, header []string, rows [][]stri
 	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF}) // BOM，Excel 友好
 	cw := csv.NewWriter(w)
 	_ = cw.Write(header)
-	for _, r := range rows {
-		_ = cw.Write(r)
+	for _, row := range rows {
+		for i := range row {
+			row[i] = csvCell(row[i])
+		}
+		_ = cw.Write(row)
 	}
 	cw.Flush()
 }
@@ -126,4 +129,16 @@ func handleExport(cfg Config, st *Store, q *Quarantine, w http.ResponseWriter, r
 	default:
 		http.Redirect(w, r, "/export", http.StatusSeeOther)
 	}
+}
+
+// csvCell 防止 Excel 把 =cmd|... 当公式执行
+func csvCell(s string) string {
+	if s == "" {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + s
+	}
+	return s
 }

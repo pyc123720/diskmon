@@ -697,11 +697,7 @@ func serveHTTP(cfg Config, st *Store) {
 				mode = "dark"
 			}
 			http.SetCookie(w, &http.Cookie{Name: themeCookie, Value: mode, Path: "/", MaxAge: 86400 * 365})
-			ref := r.URL.Query().Get("back")
-			if ref == "" || !strings.HasPrefix(ref, "/") {
-				ref = "/"
-			}
-			http.Redirect(w, r, ref, http.StatusSeeOther)
+			http.Redirect(w, r, safeBack(r.URL.Query().Get("back")), http.StatusSeeOther)
 			return
 		case "/export":
 			if r.URL.Query().Get("what") == "" {
@@ -769,7 +765,22 @@ func serveHTTP(cfg Config, st *Store) {
 		case "/media/kind":
 			_, _ = w.Write([]byte(mediaKindPage(cfg, st, r.URL.Query().Get("kind"))))
 		case "/media/dir":
-			_, _ = w.Write([]byte(mediaDirPage(cfg, st, r.URL.Query().Get("dir"))))
+			dir := r.URL.Query().Get("dir")
+			allowed := false
+			if mr := mediaCached(cfg, st); mr != nil {
+				for _, d := range mr.Dirs {
+					if strings.EqualFold(d.Dir, dir) {
+						allowed = true
+						break
+					}
+				}
+			}
+			if !allowed {
+				_, _ = w.Write([]byte(appShell("媒体清理", "media",
+					`<div class="warn">该目录不在媒体分类结果里，请先从 <a href="/media">媒体分类</a> 进入。</div>`)))
+				return
+			}
+			_, _ = w.Write([]byte(mediaDirPage(cfg, st, dir)))
 		case "/media/apply":
 			kind, val, ok := takeTicketKind(r.URL.Query().Get("n"))
 			if !ok || kind != "media" {
