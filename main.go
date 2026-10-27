@@ -113,10 +113,15 @@ func main() {
 	if len(os.Args) > 1 {
 		cmd = os.Args[1]
 	}
-	if cmd != "tray" {
-		setupConsole()
+	if cmd != "tray" && cmd != "mcp" {
+		setupConsole() // mcp 用 stdio 协议，不能动句柄
 	}
 	switch cmd {
+	case "mcp":
+		if err := mcpServe(); err != nil {
+			fmt.Fprintln(os.Stderr, "mcp:", err)
+			os.Exit(1)
+		}
 	case "tray":
 		runTray(cfg, st)
 	case "scan":

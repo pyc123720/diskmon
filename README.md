@@ -84,7 +84,45 @@ diskmon-go.exe dup C:\ 4     # duplicate-file scan (min size in MB)
 diskmon-go.exe leftovers     # uninstall leftovers scan
 diskmon-go.exe plans         # preview the 3 cleanup tiers
 diskmon-go.exe rules         # list L2 rules
+diskmon-go.exe mcp           # MCP server over stdio (for DSH / other agents)
 ```
+
+
+## MCP integration (entry point)
+
+`diskmon-go.exe mcp` runs an MCP server on stdio (newline-delimited JSON-RPC, protocol 2024-11-05).
+
+Tools exposed:
+
+| Tool | Kind |
+|---|---|
+| `diskmon_status` | read-only: capacity, free space, last scan |
+| `diskmon_health` | read-only: version, uptime, data dir |
+| `diskmon_alerts` | read-only: recent alerts |
+| `diskmon_inspect` | read-only: size / category / tier / locks for a path |
+| `diskmon_plans` | read-only: preview of the three cleanup tiers |
+| `diskmon_quarantine_list` | read-only: current quarantine entries |
+| `diskmon_clean_lazy` | reversible: run one conservative cleanup (quarantine) |
+| `diskmon_restore` | reversible: restore one quarantine entry |
+
+**Not exposed on purpose:** permanent deletion (`rule-run`, `purge`). Which tools a client may call,
+how often, and with what thresholds is the integrator's policy — this project only provides the entry.
+
+Register it in any MCP client as a stdio server:
+
+```json
+{
+  "mcpServers": {
+    "diskmon": {
+      "command": "C:\\Users\\<you>\\AppData\\Local\\Programs\\diskmon\\diskmon-go.exe",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+In DSH: Settings → MCP → add a stdio server with the command above and argument `mcp`.
+Write-type tools talk to the running tray over `http://127.0.0.1:8766`; start the tray first.
 
 ## Web UI
 

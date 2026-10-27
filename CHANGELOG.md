@@ -3,6 +3,12 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.2.0
+
+- MCP entry point: `diskmon-go.exe mcp` speaks MCP over stdio (JSON-RPC, newline-delimited).
+  Tools: status, health, alerts, inspect, plans, quarantine_list, clean_lazy, restore.
+  Permanent deletion (rule-run / purge) is intentionally not exposed; policy belongs to the client.
+
 ## 2.1.0
 
 - Incremental scanning (clean-subtree reuse): top-level subtrees with no USN events since the

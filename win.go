@@ -41,6 +41,7 @@ var (
 	pDestroyIcon          = user32.NewProc("DestroyIcon")
 	pPostMessageW         = user32.NewProc("PostMessageW")
 	pDestroyWindow        = user32.NewProc("DestroyWindow")
+	pDuplicateHandle      = kernel32.NewProc("DuplicateHandle")
 	pGetLogicalDrives     = kernel32.NewProc("GetLogicalDrives")
 	pShellNotifyIconW     = shell32.NewProc("Shell_NotifyIconW")
 	procMessageBox        = user32.NewProc("MessageBoxW")
