@@ -145,7 +145,7 @@ func printApps(cfg Config, st *Store) {
 		fmt.Println()
 		for i, d := range g.Dirs {
 			if i >= 3 {
-				fmt.Printf("    … 另外 %d 个\n", dirs-3)
+				fmt.Printf(enFormat("    … 另外 %d 个\n", "    … plus %d more\n"), dirs-3)
 				break
 			}
 			fmt.Printf("    %10s  %s\n", human(d.Bytes), d.Path)

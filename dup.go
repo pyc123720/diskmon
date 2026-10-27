@@ -248,7 +248,7 @@ func runDupScan(cfg Config, st *Store, root string, minMB int) *DupResult {
 		fmt.Printf("  %8s × %d 份，浪费 %s\n", human(g.Size), len(g.Paths), human(g.Wasted))
 		for j, p := range g.Paths {
 			if j >= 2 {
-				fmt.Printf("      … 另外 %d 份\n", len(g.Paths)-2)
+				fmt.Printf(enFormat("      … 另外 %d 份\n", "      … plus %d more copies\n"), len(g.Paths)-2)
 				break
 			}
 			fmt.Printf("      %s\n", p)

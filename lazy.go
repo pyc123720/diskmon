@@ -152,7 +152,7 @@ func lazyPage(cfg Config, st *Store) string {
 	b.WriteString(`<table><tr><th>目录</th><th style="text-align:right">大小</th></tr>`)
 	for i, d := range p.Dirs {
 		if i >= 12 {
-			b.WriteString(fmt.Sprintf(`<tr><td colspan="2" class="muted">… 另外 %d 个</td></tr>`, len(p.Dirs)-12))
+			b.WriteString(fmt.Sprintf(enFormat(`<tr><td colspan="2" class="muted">… 另外 %d 个</td></tr>`, `<tr><td colspan="2" class="muted">… plus %d more</td></tr>`), len(p.Dirs)-12))
 			break
 		}
 		b.WriteString(fmt.Sprintf(`<tr><td><code>%s</code></td><td class="r">%s</td></tr>`, htmlEscape(d.Path), human(d.Bytes)))

@@ -50,13 +50,13 @@ func dupPage(cfg Config, st *Store) string {
 	b.WriteString("<table><tr><th>大小</th><th>份数</th><th>浪费</th><th>路径（保留第一份）</th><th></th></tr>")
 	for i, g := range r.Groups {
 		if i >= 50 {
-			b.WriteString(fmt.Sprintf("<tr><td colspan='5' class='muted'>… 另外 %d 组</td></tr>", len(r.Groups)-50))
+			b.WriteString(fmt.Sprintf(enFormat("<tr><td colspan='5' class='muted'>… 另外 %d 组</td></tr>", "<tr><td colspan='5' class='muted'>… plus %d more groups</td></tr>"), len(r.Groups)-50))
 			break
 		}
 		var paths []string
 		for j, p := range g.Paths {
 			if j >= 3 {
-				paths = append(paths, fmt.Sprintf("… 另外 %d 份", len(g.Paths)-3))
+				paths = append(paths, fmt.Sprintf(enFormat("… 另外 %d 份", "… plus %d more copies"), len(g.Paths)-3))
 				break
 			}
 			mark := ""

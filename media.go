@@ -384,7 +384,7 @@ func mediaPage(cfg Config, st *Store) string {
 	b.WriteString(`<th></th></tr>`)
 	for i, d := range r.Dirs {
 		if i >= 40 {
-			b.WriteString(fmt.Sprintf(`<tr><td colspan="9" class="muted">… 另外 %d 个目录</td></tr>`, len(r.Dirs)-40))
+			b.WriteString(fmt.Sprintf(enFormat(`<tr><td colspan="9" class="muted">… 另外 %d 个目录</td></tr>`, `<tr><td colspan="9" class="muted">… plus %d more folders</td></tr>`), len(r.Dirs)-40))
 			break
 		}
 		b.WriteString(`<tr><td><code>` + htmlEscape(shortDir(d.Dir)) + `</code></td>`)

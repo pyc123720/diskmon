@@ -128,7 +128,7 @@ func planPreviewPage(cfg Config, st *Store, q *Quarantine, key string) string {
 	b.WriteString("<table><tr><th>目录</th><th>类别</th><th style='text-align:right'>大小</th></tr>")
 	for i, d := range p.Dirs {
 		if i >= 80 {
-			b.WriteString(fmt.Sprintf("<tr><td colspan='3' style='color:#8b94a7'>… 另外 %d 个</td></tr>", len(p.Dirs)-80))
+			b.WriteString(fmt.Sprintf(enFormat("<tr><td colspan='3' style='color:#8b94a7'>… 另外 %d 个</td></tr>", "<tr><td colspan='3' style='color:#8b94a7'>… plus %d more</td></tr>"), len(p.Dirs)-80))
 			break
 		}
 		meta := cats[d.Cat]

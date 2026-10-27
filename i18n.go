@@ -178,3 +178,11 @@ func translateHTML(s string) string {
 	}
 	return s
 }
+
+// enFormat 在英文模式下选用英文格式串（用于含 %d 的动态行）
+func enFormat(zh, en string) string {
+	if isEN() {
+		return en
+	}
+	return zh
+}
