@@ -8,6 +8,9 @@ RFC 3161 timestamp, verifiable with `signtool verify`), it just is not backed by
 
 ## Free signing for OSS: SignPath Foundation
 
+> Ready-to-paste application text: [SIGNPATH-APPLICATION.md](SIGNPATH-APPLICATION.md).
+
+
 [SignPath Foundation](https://signpath.org/) signs open-source Windows binaries for free.
 This repository already satisfies the typical requirements:
 
