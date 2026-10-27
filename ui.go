@@ -113,6 +113,7 @@ func appShell(title, active, body string) string {
 <title>` + htmlEscape(title) + ` · diskmon</title>
 <link rel="icon" href="/favicon.ico">
 <style>` + css + navCSS + themeCSS() + `</style></head><body><div class="wrap">` + navBar(active) + dataDirBanner() + muteBanner() + body + uiJS + `</div></body></html>`
+	html = strings.Replace(html, "</body></html>", loadOverlay + "</body></html>", 1)
 	return translateHTML(html)
 }
 
@@ -688,3 +689,45 @@ func themeCSS() string {
 	}
 	return ""
 }
+
+
+// loadOverlay：点击链接/提交表单后，浏览器等待服务器响应期间的反馈
+const loadOverlay = `<div id="dshload" aria-hidden="true"><div class="lbar"><i></i></div><div class="ltext">正在处理…</div></div>
+<style>
+#dshload{position:fixed;inset:0;display:none;z-index:9999;pointer-events:none}
+#dshload.on{display:block}
+#dshload .lbar{position:absolute;top:0;left:0;right:0;height:3px;background:#1c212b;overflow:hidden}
+#dshload .lbar i{display:block;height:100%;width:30%;background:linear-gradient(90deg,transparent,#33c179,#7df0b3);animation:dshbar 1.1s ease-in-out infinite}
+#dshload .ltext{position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);background:#151a22ee;border:1px solid #2a3240;border-radius:10px;padding:10px 16px;color:#c7d3e3;font-size:13px;display:none;box-shadow:0 10px 30px #0008}
+#dshload.slow .ltext{display:block}
+@keyframes dshbar{0%{margin-left:-30%}100%{margin-left:100%}}
+</style>
+<script>
+(function(){
+  var el = document.getElementById('dshload');
+  if(!el) return;
+  var t1=null,t2=null;
+  function show(msg){
+    el.classList.add('on');
+    el.classList.remove('slow');
+    t1 = setTimeout(function(){ el.classList.add('slow'); }, 600);
+    var tx = el.querySelector('.ltext');
+    if(msg) tx.textContent = msg;
+  }
+  function hide(){ clearTimeout(t1); el.classList.remove('on','slow'); }
+  document.addEventListener('click', function(e){
+    var a = e.target.closest ? e.target.closest('a') : null;
+    if(!a) return;
+    if(a.target === '_blank' || a.hasAttribute('download')) return;
+    var href = a.getAttribute('href') || '';
+    if(!href || href.charAt(0) === '#' || href.indexOf('javascript:') === 0) return;
+    if(href.indexOf('/reveal') === 0) return;
+    show(a.getAttribute('data-loading') || '正在打开…');
+  }, true);
+  document.addEventListener('submit', function(){
+    show(document.body.getAttribute('data-submit') || '正在处理…');
+  }, true);
+  window.addEventListener('pageshow', hide);
+  window.addEventListener('load', hide);
+})();
+</script>`

@@ -752,6 +752,10 @@ func serveHTTP(cfg Config, st *Store) {
 			}
 			handleExport(cfg, st, q, w, r)
 			return
+		case "/inspect/result":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(inspectBody(cfg, st, r.URL.Query().Get("path"))))
+			return
 		case "/inspect":
 			_, _ = w.Write([]byte(inspectPage(cfg, st, r.URL.Query().Get("path"))))
 		case "/settings":

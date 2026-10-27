@@ -3,6 +3,14 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.5.1
+
+- Loading feedback for waits: a thin animated progress bar appears on any internal navigation or form
+  submit; after 0.6 s a "正在处理…" card is shown, so slow actions (preview/quarantine, restore,
+  undo, duplicate cleanup) no longer look frozen.
+- Path inspection is asynchronous: the page returns in ~6 ms with a spinner, the analysis loads
+  separately (~2 s for a folder with thousands of files).
+
 ## 2.5.0
 
 - A folder whose name looks like a cache (Cache / Temp / Logs / GPUCache / Code Cache) is now
