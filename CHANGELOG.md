@@ -3,6 +3,12 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.5.2
+
+- Quarantine and preset-cleanup now run in the background with a live progress page: bytes moved,
+  files, skipped locked files, current file, and an accounted result (moved vs planned, errors).
+  The browser no longer sits frozen on "演练并隔离", and the global pill shows "移动文件 X GB".
+
 ## 2.5.1
 
 - Loading feedback for waits: a thin animated progress bar appears on any internal navigation or form

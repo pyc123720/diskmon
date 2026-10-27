@@ -366,23 +366,30 @@ func quarantineRoutes(cfg Config, st *Store, q *Quarantine, w http.ResponseWrite
 		return true
 	case "/q/apply":
 		path, ok := takeTicket(r.URL.Query().Get("n"))
-		var b strings.Builder
 		if !ok {
-			b.WriteString(`<div class="warn">票据无效或已过期，请重新演练。</div><a class="btn" href="/">返回</a>`)
-		} else {
-			e, err := q.apply(cfg, path, "web")
-			if err != nil {
-				b.WriteString(`<div class="warn">隔离失败：` + htmlEscape(err.Error()) + `</div>`)
-			} else {
-				st.AddAlert("quarantine", fmt.Sprintf("已隔离 %s（%s，%d 个文件），可还原", filepath.Base(path), human(e.Bytes), e.Files))
-				b.WriteString(fmt.Sprintf(`<div class="ok">已隔离 <b>%s</b>：%s，%d 个文件。7 天内可在看板里还原。<br>ID：<code>%s</code></div>`,
-					htmlEscape(filepath.Base(path)), human(e.Bytes), e.Files, e.ID))
-				notify("diskmon 已隔离", fmt.Sprintf("%s（%s）已移到隔离区，可还原", filepath.Base(path), human(e.Bytes)), false)
-			}
-			b.WriteString(`<a class="btn" href="/">返回看板</a>`)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(pageShell("隔离结果", `<div class="warn">票据无效或已过期，请重新演练。</div><a class="btn" href="/">返回</a>`)))
+			return true
+		}
+		if !startQuarantineOp(cfg, st, []string{path}, "隔离 "+filepath.Base(path)) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(pageShell("繁忙", `<div class="warn">已有清理任务在运行，请先等它完成。</div><a class="btn" href="/op">看进度</a>`)))
+			return true
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(pageShell("隔离结果", b.String())))
+		_, _ = w.Write([]byte(opPage(cfg, st)))
+		return true
+	case "/op":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(opPage(cfg, st)))
+		return true
+	case "/api/op":
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		s := opNow()
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"running": s.Running, "label": s.Label, "done": s.Done, "total": s.Total,
+			"bytes": s.Bytes, "files": s.Files, "skipped": s.Skipped, "error": len(s.Errors),
+		})
 		return true
 	case "/q/rebuild":
 		rec, orph, skip := q.rebuild()
@@ -657,6 +664,10 @@ func serveHTTP(cfg Config, st *Store) {
 			ls := lazyState()
 			payload := map[string]interface{}{
 				"scan": map[string]interface{}{"running": sp.Running, "pct": sp.Pct, "files": sp.Files, "eta": sp.ETA},
+				"op": func() map[string]interface{} {
+					o := opNow()
+					return map[string]interface{}{"running": o.Running, "label": o.Label, "done": o.Done, "total": o.Total, "bytes": o.Bytes}
+				}(),
 				"lazy": map[string]interface{}{
 					"running": ls.Running, "done": ls.Done, "total": ls.Total,
 					"planned": ls.Planned, "freed": ls.Freed, "failed": ls.Failed,
@@ -950,34 +961,33 @@ func planRoutes(cfg Config, st *Store, q *Quarantine, w http.ResponseWriter, r *
 		return true
 	case "/plan/apply":
 		kind, key, ok := takeTicketKind(r.URL.Query().Get("n"))
-		var b strings.Builder
 		if !ok || kind != "plan" {
-			b.WriteString(`<div class="warn">票据无效或已过期，请重新演练。</div>`)
-		} else {
-			n, freed, fails := planApply(cfg, st, q, key)
-			label := key
-			if i, ok := planByKey(key); ok {
-				label = planDefs[i].Label
-			}
-			if n > 0 {
-				st.AddAlert("plan-run", fmt.Sprintf("一键清理[%s]：隔离 %d 个目录，%s", label, n, human(freed)))
-				notify("diskmon 清理完成", fmt.Sprintf("%s方案：%d 个目录，%s", label, n, human(freed)), false)
-			}
-			b.WriteString(fmt.Sprintf(`<div class="ok">已隔离 <b>%d</b> 个目录，释放 <b>%s</b>（可在看板还原）</div>`, n, human(freed)))
-			if len(fails) > 0 {
-				b.WriteString(fmt.Sprintf(`<div class="warn">%d 个失败：<br>`, len(fails)))
-				for i, f := range fails {
-					if i >= 6 {
-						break
-					}
-					b.WriteString("<code>" + htmlEscape(f) + "</code><br>")
-				}
-				b.WriteString("</div>")
-			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(pageShell("一键清理", `<div class="warn">票据无效或已过期，请重新演练。</div><a class="btn" href="/clean">返回清理中心</a>`)))
+			return true
 		}
-		b.WriteString(`<a class="btn" href="/">返回看板</a>`)
+		label := key
+		if i, ok := planByKey(key); ok {
+			label = planDefs[i].Label
+		}
+		p := buildPlan(cfg, st, key)
+		paths := make([]string, 0, len(p.Dirs))
+		for _, d := range p.Dirs {
+			paths = append(paths, d.Path)
+		}
+		if len(paths) == 0 {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(pageShell("一键清理", `<div class="warn">没有可清理的目录。</div><a class="btn" href="/clean">返回清理中心</a>`)))
+			return true
+		}
+		if !startQuarantineOp(cfg, st, paths, "一键清理 · "+label) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(pageShell("繁忙", `<div class="warn">已有清理任务在运行。</div><a class="btn" href="/op">看进度</a>`)))
+			return true
+		}
+		st.AddAlert("plan-run", fmt.Sprintf("一键清理[%s]：开始隔离 %d 个目录", label, len(paths)))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(pageShell("一键清理结果", b.String())))
+		_, _ = w.Write([]byte(opPage(cfg, st)))
 		return true
 	}
 	return false

@@ -669,6 +669,10 @@ function actTick(){
     if(a.scan && a.scan.running){
       h += actPill('/scan', '● 扫描中 ' + Math.round(a.scan.pct||0) + '%', '#8ff0b8', '#173327');
     }
+    if(a.op && a.op.running){
+      var ogb = ((a.op.bytes||0)/1073741824).toFixed(1);
+      h += actPill('/op', '● 移动文件 ' + ogb + ' GB', '#9fd0ff', '#172433');
+    }
     if(a.lazy && a.lazy.running){
       var gb = ((a.lazy.freed||0)/1073741824).toFixed(1);
       var pg = ((a.lazy.planned||0)/1073741824).toFixed(1);
