@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -141,13 +142,27 @@ var zh2en = map[string]string{
 	"只读扫描，不会改动任何文件。首次通常 1–2 分钟。": "Read-only scan, changes nothing. First run usually 1–2 minutes.",
 }
 
-var dictKeys []string
+var (
+	dictKeys []string
+	dictOnce sync.Once
+)
 
-func init() {
-	for k := range zh2en {
-		dictKeys = append(dictKeys, k)
-	}
-	sort.Slice(dictKeys, func(i, j int) bool { return len(dictKeys[i]) > len(dictKeys[j]) })
+// buildDict 合并基础字典与句子级补充，按长度降序，保证长句优先
+func buildDict() {
+	dictOnce.Do(func() {
+		for k, v := range zh2enExtra {
+			if _, exists := zh2en[k]; !exists {
+				zh2en[k] = v
+			}
+		}
+		for k := range zh2en {
+			if len([]rune(k)) < 2 {
+				continue // 单字词条太容易误伤长句
+			}
+			dictKeys = append(dictKeys, k)
+		}
+		sort.Slice(dictKeys, func(i, j int) bool { return len(dictKeys[i]) > len(dictKeys[j]) })
+	})
 }
 
 // translateHTML 把页面里的中文短语替换成英文（只做唯一短语替换，不解析 HTML）
@@ -155,6 +170,7 @@ func translateHTML(s string) string {
 	if !isEN() {
 		return s
 	}
+	buildDict()
 	for _, k := range dictKeys {
 		if strings.Contains(s, k) {
 			s = strings.ReplaceAll(s, k, zh2en[k])
