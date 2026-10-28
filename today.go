@@ -119,7 +119,7 @@ func todayBoardFor(cfg Config, st *Store) todayBoard {
 		basis.WriteString(bi(fmt.Sprintf(" · 近 7 天中位 %s/天", human(med)), fmt.Sprintf(" · median %s/day", human(med))))
 	}
 	if f.OK && !math.IsInf(f.DaysP50, 1) && f.DaysP50 > 0 && f.DaysP50 < 3650 {
-		basis.WriteString(bi(fmt.Sprintf(" · 约 %s 后写满", fmtDur(f.DaysP50, true)), fmt.Sprintf(" · full in ~%s", fmtDur(f.DaysP50, true))))
+		basis.WriteString(bi(fmt.Sprintf(" · 约 %s后写满", fmtDur(f.DaysP50, true)), fmt.Sprintf(" · full in ~%s", fmtDur(f.DaysP50, true))))
 	}
 
 	b := todayBoard{Basis: basis.String()}
@@ -141,7 +141,7 @@ func todayBoardFor(cfg Config, st *Store) todayBoard {
 		plan := buildPlan(cfg, st, "conservative")
 		why := bi(fmt.Sprintf("剩余 %s。", human(v.Free)), fmt.Sprintf("%s free.", human(v.Free)))
 		if f.OK && !math.IsInf(f.DaysP50, 1) && f.DaysP50 < 3650 {
-			why += bi(fmt.Sprintf("按最近 %s/天 的增速，约 %s 后写满。", human(med), fmtDur(f.DaysP50, true)),
+			why += bi(fmt.Sprintf("按最近 %s/天 的增速，约 %s后写满。", human(med), fmtDur(f.DaysP50, true)),
 				fmt.Sprintf(" At %s/day it fills up in ~%s.", human(med), fmtDur(f.DaysP50, true)))
 		}
 		if hasToday && todayGrow > 0 {
