@@ -3,6 +3,26 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.5.6
+
+- **"今日建议" rewrite.** The card used to be a fixed priority ladder, so it showed the same
+  sentence every time you opened it. It now ranks by what is actually true today and states its
+  evidence:
+  * a basis line with scan freshness, today's net growth, 7-day median and days-to-full;
+  * space pressure first (low free space, or less than 7 days left) — urgent;
+  * stale data (>48 h) is called out instead of quietly serving old numbers;
+  * a day whose growth is more than 2x the median (and over 500 MB) is surfaced with the multiplier;
+  * what was already quarantined today is reported (with the reminder that the space only returns
+    when quarantine is purged), so the same suggestion is not repeated;
+  * at most three items, each with its own reason and action; a genuinely quiet day says so.
+- **`diskmon-go.exe diag`**: writes a text bundle (version, elevation, config, last-scan summary,
+  top categories/folders/files/owners, growth forecast, quarantine, recent alerts, log tail) so a
+  bug report arrives complete.
+- **Issue handling**: Issue Forms with required fields, automatic triage labels and first response,
+  and auto-nudge/close of issues stuck on `needs-info`. New docs: `docs/FAQ.md` (the "this is not a
+  bug" answers, including why freeing space needs the quarantine purge) and `docs/TRIAGE.md`
+  (response cadence, priorities, what gets closed).
+
 ## 2.5.5
 
 - "计划 974 MB，实际 2 MB" explained and reduced:

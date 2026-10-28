@@ -117,115 +117,6 @@ func appShell(title, active, body string) string {
 	return translateHTML(html)
 }
 
-// ---------- 今日建议 ----------
-
-type suggestion struct {
-	Title  string
-	Why    string
-	Href   string
-	Action string
-	Extra  string
-}
-
-func todaySuggestion(cfg Config, st *Store) suggestion {
-	// 1) 规则试运行里有可释放的
-	stats := st.allRuleStats()
-	bestRule := ""
-	var bestFree uint64
-	for _, r := range cfg.Rules {
-		s := stats[r.Name]
-		if s.WouldFree > bestFree {
-			bestFree = s.WouldFree
-			bestRule = r.Name
-		}
-	}
-	if bestFree > 0 {
-		if isEN() {
-			return suggestion{
-				Title:  "Enable an auto-clean rule",
-				Why:    fmt.Sprintf("Dry-run for \"%s\" shows %s reclaimable. Once enabled it runs daily; run a dry-run first if unsure.", bestRule, human(bestFree)),
-				Href:   "/rules",
-				Action: "Review & enable",
-				Extra:  "all cleanups are undoable (7 days)",
-			}
-		}
-		return suggestion{
-			Title:  "确认一条规则，常驻自动清理",
-			Why:    fmt.Sprintf("自动清理「%s」试运行显示可释放 %s。确认启用后，它会按天自动处理；不放心可以先点「立即试运行」再决定。", bestRule, human(bestFree)),
-			Href:   "/rules",
-			Action: "去确认启用",
-			Extra:  "全部动作可还原（7 天）",
-		}
-	}
-	// 2) 保守方案
-	if p := buildPlan(cfg, st, "conservative"); len(p.Dirs) > 0 {
-		if isEN() {
-			return suggestion{
-				Title:  "Start with a conservative cleanup",
-				Why:    fmt.Sprintf("The conservative preset reclaims %s (%d folders: temp, dev cache, update cache, logs). Undoable for 7 days.", human(p.Bytes), len(p.Dirs)),
-				Href:   "/plan/preview?key=conservative",
-				Action: "Preview & clean",
-				Extra:  fmt.Sprintf("standard %s · aggressive %s", human(buildPlan(cfg, st, "standard").Bytes), human(buildPlan(cfg, st, "aggressive").Bytes)),
-			}
-		}
-		return suggestion{
-			Title:  "先做保守清理",
-			Why:    fmt.Sprintf("保守方案能回收 %s（%d 个目录，全部是可清类：临时文件/开发缓存/更新缓存/日志）。执行后 7 天内可还原。", human(p.Bytes), len(p.Dirs)),
-			Href:   "/plan/preview?key=conservative",
-			Action: "演练并清理",
-			Extra:  fmt.Sprintf("标准 %s · 激进 %s", human(buildPlan(cfg, st, "standard").Bytes), human(buildPlan(cfg, st, "aggressive").Bytes)),
-		}
-	}
-	// 3) 重复文件
-	if r := loadDups(cfg); r != nil && r.TotalWasted > 0 {
-		if isEN() {
-			return suggestion{
-				Title:  "Handle duplicate files",
-				Why:    fmt.Sprintf("Last scan found %d duplicate groups, %s reclaimable. One copy is kept per group.", len(r.Groups), human(r.TotalWasted)),
-				Href:   "/dup",
-				Action: "Review duplicates",
-			}
-		}
-		return suggestion{
-			Title:  "处理重复文件",
-			Why:    fmt.Sprintf("上次扫描发现 %d 组重复，可释放 %s。每组保留第一份，其余进隔离区。", len(r.Groups), human(r.TotalWasted)),
-			Href:   "/dup",
-			Action: "查看重复文件",
-		}
-	}
-	// 4) 兜底
-	if sc := st.GetScan(); sc != nil {
-		if isEN() {
-			return suggestion{
-				Title:  "Scan complete - nothing safe to clean",
-				Why:    fmt.Sprintf("Scanned %d files. No safe-tier folders above the threshold; keep monitoring for growth.", sc.Files),
-				Href:   "/detail/clean",
-				Action: "See breakdown",
-			}
-		}
-		return suggestion{
-			Title:  "扫描完成，暂无可安全清理的目录",
-			Why:    fmt.Sprintf("已扫描 %d 个文件，可清类目录都在阈值以下；继续观察增长即可。", sc.Files),
-			Href:   "/detail/clean",
-			Action: "看分类明细",
-		}
-	}
-	if isEN() {
-		return suggestion{
-			Title:  "Scan once to get data",
-			Why:    "No scan yet. A full scan takes about 1–2 minutes; after that categories, presets and trends have numbers.",
-			Href:   "/scan",
-			Action: "Start scan",
-		}
-	}
-	return suggestion{
-		Title:  "先扫一遍拿到数据",
-		Why:    "还没有扫描结果。全盘扫描约 100 秒，之后分类、方案、趋势都会有数字。",
-		Href:   "/scan",
-		Action: "开始扫描",
-	}
-}
-
 // ---------- 总览页 ----------
 
 func overviewPage(cfg Config, st *Store) string {
@@ -236,7 +127,7 @@ func overviewPage(cfg Config, st *Store) string {
 	if v.Total > 0 {
 		pct = float64(v.Total-v.Free) / float64(v.Total) * 100
 	}
-	sug := todaySuggestion(cfg, st)
+	board := todayBoardFor(cfg, st)
 	var b strings.Builder
 
 	b.WriteString(firstRunBanner(cfg, st))
@@ -293,15 +184,44 @@ func overviewPage(cfg Config, st *Store) string {
 	b.WriteString(`<div style="margin-top:14px"><a class="btn" href="/scan">重新扫描</a><a class="btn" href="/scan?full=1">强制全扫</a></div>`)
 	b.WriteString(`</div></div></div>`)
 
-	// 右：今日建议
-	b.WriteString(`<div class="card"><h2>今日建议</h2><div class="rec">`)
-	b.WriteString(`<h3>` + htmlEscape(sug.Title) + `</h3>`)
-	b.WriteString(`<div class="why">` + htmlEscape(sug.Why) + `</div>`)
-	b.WriteString(`<a class="btn" style="background:#1f6f4a;border-color:#33c179" href="` + sug.Href + `">` + htmlEscape(sug.Action) + `</a>`)
-	if sug.Extra != "" {
-		b.WriteString(`<span class="muted" style="margin-left:10px">` + htmlEscape(sug.Extra) + `</span>`)
+	// 右：今日建议（结论随当天状态变化，依据行说明「为什么是今天」）
+	if len(board.Items) == 0 { // 兜底：绝不因为建议为空把整页打崩
+		board.Items = append(board.Items, todayItem{Kind: "quiet",
+			Title:  bi("今天没有需要处理的事", "Nothing to do today"),
+			Why:    bi("没有异常增长，也没有待处理的隔离项。", "No unusual growth and nothing waiting in quarantine."),
+			Href:   "/trend", Action: bi("看一眼趋势", "Check the trend")})
 	}
-	b.WriteString(`</div></div></div>`)
+	head, rest := board.Items[0], board.Items[1:]
+	b.WriteString(`<div class="card"><h2>今日建议<span class="muted" style="float:right;font-weight:400;font-size:13px">` +
+		time.Now().Format("01-02") + `</span></h2>`)
+	b.WriteString(`<div class="muted" style="font-size:12px;line-height:1.6;margin:-2px 0 12px">` + htmlEscape(board.Basis) + `</div>`)
+	b.WriteString(`<div class="rec">`)
+	b.WriteString(`<h3>` + htmlEscape(head.Title) + `</h3>`)
+	b.WriteString(`<div class="why">` + htmlEscape(head.Why) + `</div>`)
+	btnStyle := "background:#1f6f4a;border-color:#33c179"
+	if head.Kind == "quiet" {
+		btnStyle = ""
+	}
+	b.WriteString(`<a class="btn" style="` + btnStyle + `" href="` + head.Href + `">` + htmlEscape(head.Action) + `</a>`)
+	b.WriteString(`</div>`)
+	for _, it := range rest {
+		dot := "#c9a24a"
+		switch it.Kind {
+		case "done":
+			dot = "#33c179"
+		case "urgent":
+			dot = "#e05d5d"
+		case "quiet":
+			dot = "#5c6779"
+		}
+		b.WriteString(`<div style="margin-top:12px;padding-top:10px;border-top:1px solid #232a36">`)
+		b.WriteString(fmt.Sprintf(`<div style="font-size:13px;font-weight:600"><span style="color:%s">●</span> `, dot) +
+			htmlEscape(it.Title) + `</div>`)
+		b.WriteString(`<div class="muted" style="font-size:12px;line-height:1.6;margin:3px 0 6px">` + htmlEscape(it.Why) + `</div>`)
+		b.WriteString(`<a class="act" href="` + it.Href + `">` + htmlEscape(it.Action) + ` →</a>`)
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`</div></div>`) // 今日建议 card, .g2 网格
 
 	// 路径体检入口
 	b.WriteString(`<div class="card" style="margin-top:14px"><h2>查路径</h2>

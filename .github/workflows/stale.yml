@@ -1,0 +1,35 @@
+name: stale issues
+
+# 只清理「挂了 needs-info、又没人补料」的 issue。
+# 21 天没动静先提醒，再 14 天自动关；关掉不是拒绝，补料后随时重开。
+# 不想用这套：把这个文件删掉即可，不会影响其它工作流。
+on:
+  schedule:
+    - cron: "0 2 * * 1" # 每周一 02:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          only-issue-labels: "needs-info"
+          days-before-stale: 21
+          days-before-close: 14
+          stale-issue-label: "stale"
+          exempt-issue-labels: "data-loss,pinned"
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          operations-per-run: 30
+          stale-issue-message: |
+            这条 issue 在等补充材料（通常是 `diskmon-go.exe diag` 的输出），已经 21 天没有动静了。
+
+            补上之后我会重新看；如果 14 天内仍没有新消息，会自动关闭。关掉之后补料随时重开，不用客气。
+
+            —— 列表太长的时候，这是唯一能让真正的新问题不被埋掉的办法。
+          close-issue-message: |
+            因为缺少复现材料先关掉。补上 `diskmon-go.exe diag` 的内容后随时重开，我会看。

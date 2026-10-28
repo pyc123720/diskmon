@@ -1,0 +1,24 @@
+name: issue triage
+
+# 托管说明：新 issue 自动打标签 + 首次回复。
+# 只做「收集材料」和「设定期望」，不做判断、不自动关闭 —— 判断留给人工。
+# 逻辑在 .github/scripts/triage.js，改文案不用动工作流。
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const run = require("./.github/scripts/triage.js");
+            await run({ github, context, core });

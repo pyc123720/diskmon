@@ -120,6 +120,7 @@ diskmon-go.exe report        # write an HTML report
 diskmon-go.exe serve         # serve the dashboard only
 diskmon-go.exe status        # one-line status
 diskmon-go.exe health        # version / uptime / goroutines / counters
+diskmon-go.exe diag          # write a diagnostics bundle (run this before filing a bug)
 diskmon-go.exe dup C:\ 4     # duplicate-file scan (min size in MB)
 diskmon-go.exe leftovers     # uninstall leftovers scan
 diskmon-go.exe plans         # preview the 3 cleanup tiers
@@ -198,6 +199,20 @@ Write-type tools talk to the running tray over `http://127.0.0.1:8766`; start th
 
 No telemetry, no network calls except the timestamp server used when signing a build.
 All data stays in `%LOCALAPPDATA%\diskmon-go` (or the configured data directory).
+
+## Feedback and response times
+
+Single maintainer, limited hours, but the process is explicit:
+
+- **Before filing a bug, run `diskmon-go.exe diag`** and paste the generated `diag-<timestamp>.txt`.
+  It contains version, OS, config, last-scan summary, alerts and the log tail — one round instead of four.
+- Check **[docs/FAQ.md](docs/FAQ.md)** first: SmartScreen warnings, "I cleaned 4 GB but free space didn't move"
+  (quarantine lives on the same volume and is only released when purged), "planned 4 GB but only 12 MB"
+  (files were locked), why process attribution is approximate, and so on.
+- Response cadence, label meanings and close policy are in **[docs/TRIAGE.md](docs/TRIAGE.md)**:
+  I usually look **once a week** (evenings + weekends), ordered by data safety > crashes > wrong results > UX.
+- Inactive issues labelled `needs-info` are nudged and then closed by GitHub Actions; add the missing
+  details and reopen at any time.
 
 ## Contributing
 

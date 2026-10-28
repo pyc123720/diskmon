@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 常见问题（先看这个）
+    url: https://github.com/pyc123720/diskmon/blob/main/docs/FAQ.md
+    about: SmartScreen 报毒、清理后空间没变、结果和预期不符、进程归因不准 —— 大部分问题这里已经有答案。
+  - name: 发行说明与已知问题
+    url: https://github.com/pyc123720/diskmon/blob/main/CHANGELOG.md
+    about: 先确认你遇到的不是已经修好的旧问题。

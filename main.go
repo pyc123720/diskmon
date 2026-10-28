@@ -219,6 +219,10 @@ func main() {
 		openAppWindow(cfg.Port)
 	case "health":
 		fmt.Println(healthSnapshot(cfg, st).Text())
+	case "diag":
+		if code := diagCommand(cfg, st); code != 0 {
+			os.Exit(code)
+		}
 	case "procs":
 		printProcs()
 	case "dup":

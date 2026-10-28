@@ -80,6 +80,7 @@ diskmon-go.exe report        # 生成 HTML 报告
 diskmon-go.exe serve         # 只启动看板服务
 diskmon-go.exe status        # 一行状态
 diskmon-go.exe health        # 版本/运行时长/goroutine/计数器
+diskmon-go.exe diag          # 生成诊断包（报 bug 前跑这个）
 diskmon-go.exe dup C:\ 4     # 重复文件扫描（最小 MB）
 diskmon-go.exe leftovers     # 卸载残留扫描
 diskmon-go.exe plans         # 预览三档清理方案
@@ -120,6 +121,19 @@ diskmon-go.exe rules         # 列出 L2 规则
 
 无遥测；除签名时访问时间戳服务器外不联网。数据都在 `%LOCALAPPDATA%\diskmon-go`
 （或配置的数据目录）。
+
+## 反馈与响应
+
+一个人维护，时间有限，但流程是明确的：
+
+- **报 bug 前先跑 `diskmon-go.exe diag`**，把生成的 `diag-<时间>.txt` 贴进 issue。
+  里面有版本、系统、配置、上次扫描摘要、告警和日志尾巴 —— 一次问完，省掉几轮来回。
+- 常见现象先看 **[docs/FAQ.md](docs/FAQ.md)**：SmartScreen 拦截、清理后空间没变大（隔离区同盘、
+  清空后才释放）、「计划 4 GB 实际 12 MB」（文件被占用）、进程归因为什么是近似值……
+- 回应节奏、标签含义、什么会被关掉，都写在 **[docs/TRIAGE.md](docs/TRIAGE.md)**：
+  通常**一周内**看一次（工作日晚上 + 周末），按数据安全 > 崩溃 > 误判 > 体验排序。
+- 长时间没回应的 issue 由 GitHub Actions 自动提醒/关闭（只针对挂了 `needs-info` 的），
+  补上材料随时重开。
 
 ## 贡献
 
