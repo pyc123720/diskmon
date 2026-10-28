@@ -3,6 +3,25 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.5.8
+
+- **Lazy clean can be paused, resumed and stopped.** While it is running, both the lazy page and
+  the overview card show Pause / Continue / Stop. Pause takes effect before the next file; Stop
+  waits for the file in progress, keeps everything already moved in the quarantine (still undoable),
+  and reports how many folders were left untouched. A stopped run is labelled as stopped instead
+  of looking like a finished one.
+- **Plan vs actual is now honest.**
+  * The "plan" is re-measured from the filesystem right before cleaning instead of reusing a scan
+    snapshot that may be hours old (folders that exceed the 4 s measurement budget keep the
+    snapshot value, and the page says so).
+  * Results list planned / actual / difference per folder, and the summary explains the gap:
+    more than planned means caches kept growing during the run; less means files were locked and
+    skipped.
+  * Quarantine now measures size without opening every file for a lock check first — much faster on
+    large caches — and lock detection still happens when a file cannot actually be moved.
+- Fixed the completion alert reporting the failure count as the skipped-file count.
+- Tests: pause/resume/stop gate, measured-plan behaviour, planned-vs-actual explanations.
+
 ## 2.5.7
 
 - **Security fix: cross-site requests are blocked.** The dashboard only listens on 127.0.0.1, but

@@ -74,7 +74,7 @@ func startQuarantineOpReason(cfg Config, st *Store, paths []string, label, reaso
 				opCur.Skipped = skipped + s
 				opCur.Current = cur
 				opMu.Unlock()
-			})
+			}, nil)
 			opMu.Lock()
 			opCur.Done = i + 1
 			if err != nil {

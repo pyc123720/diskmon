@@ -755,8 +755,10 @@ func newHTTPHandler(cfg Config, st *Store) http.Handler {
 					return map[string]interface{}{"running": o.Running, "label": o.Label, "done": o.Done, "total": o.Total, "bytes": o.Bytes}
 				}(),
 				"lazy": map[string]interface{}{
-					"running": ls.Running, "done": ls.Done, "total": ls.Total,
-					"planned": ls.Planned, "freed": ls.Freed, "failed": ls.Failed,
+					"running": ls.Running, "paused": ls.Paused, "stopping": ls.Stopping,
+					"stopped": ls.Stopped, "measuring": ls.Measuring, "done": ls.Done, "total": ls.Total,
+					"remaining": ls.Remaining, "planned": ls.Planned, "snapshot": ls.Snapshot,
+					"plan_partial": ls.PlanPartial, "freed": ls.Freed, "failed": ls.Failed,
 					"files": ls.Files, "skipped_files": ls.SkippedFiles, "current": ls.Current,
 					"finished": ls.Finished.Unix(), "error": ls.Err,
 				},
@@ -975,7 +977,23 @@ func newHTTPHandler(cfg Config, st *Store) http.Handler {
 			ok := startLazy(cfg, st, q)
 			_, _ = w.Write([]byte(lazyResultPage(cfg, st, ok)))
 			return
+		case "/lazy/pause":
+			lazyPause()
+			http.Redirect(w, r, "/lazy", http.StatusSeeOther)
+			return
+		case "/lazy/resume":
+			lazyResume()
+			http.Redirect(w, r, "/lazy", http.StatusSeeOther)
+			return
+		case "/lazy/stop":
+			lazyStop()
+			http.Redirect(w, r, "/lazy", http.StatusSeeOther)
+			return
 		case "/lazy/undo":
+			if lazyState().Running {
+				_, _ = w.Write([]byte(appShell("撤销清理", "clean", `<div class="warn">清理还在进行中（或还没停稳）。先「停止清理」，等它收尾后再撤销，避免边移边还原。</div><a class="btn" href="/lazy">返回懒人清理</a>`)))
+				return
+			}
 			ids := lazySeenIDs()
 			if len(ids) == 0 {
 				_, _ = w.Write([]byte(appShell("撤销清理", "clean", `<div class="warn">没有可撤销的记录（可能已撤销或服务重启过）。请到隔离区手动还原。</div><a class="btn" href="/q">去隔离区</a>`)))

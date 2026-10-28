@@ -16,6 +16,7 @@ type Plan struct {
 	Dirs    []DirEntry
 	Bytes   uint64
 	MinSize uint64
+	ScanTS  int64 // 计划所依据的扫描快照时间；0 表示还没扫描
 }
 
 var planDefs = []struct {
@@ -64,6 +65,7 @@ func buildPlan(cfg Config, st *Store, key string) Plan {
 	if sc == nil {
 		return p
 	}
+	p.ScanTS = sc.TS
 	wl := make([]string, len(cfg.Whitelist))
 	for i, w := range cfg.Whitelist {
 		wl[i] = strings.ToLower(w)

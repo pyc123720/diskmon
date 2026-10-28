@@ -239,10 +239,22 @@ func overviewPage(cfg Config, st *Store) string {
 		if ls.Planned > 0 {
 			pct = int(float64(ls.Freed) / float64(ls.Planned) * 100)
 		}
-		b.WriteString(fmt.Sprintf(`<div><span class="big" style="font-size:26px;font-weight:700">%s</span> <span class="muted">/ 计划 %s · %d 个文件已移动</span></div>`,
-			human(ls.Freed), human(ls.Planned), ls.Files))
+		if pct > 100 {
+			pct = 100
+		}
+		state := "清理中"
+		switch {
+		case ls.Stopping:
+			state = "正在停止"
+		case ls.Paused:
+			state = "已暂停"
+		case ls.Measuring:
+			state = "正在重新测量"
+		}
+		b.WriteString(fmt.Sprintf(`<div><span class="big" style="font-size:26px;font-weight:700">%s</span> <span class="muted">/ 计划 %s · %d 个文件已移动 · %s</span></div>`,
+			human(ls.Freed), human(ls.Planned), ls.Files, state))
 		b.WriteString(fmt.Sprintf(`<div style="height:8px;background:#1c212b;border-radius:5px;overflow:hidden;margin:10px 0"><div style="height:100%%;width:%d%%;background:#33c179;transition:width .4s"></div></div>`, pct))
-		b.WriteString(`<a class="btn" href="/lazy">看进度</a>`)
+		b.WriteString(`<a class="btn" href="/lazy">看进度 / 暂停 / 停止</a>`)
 	case len(lp.Dirs) > 0:
 		b.WriteString(`<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">`)
 		b.WriteString(fmt.Sprintf(`<div><span class="big" style="font-size:26px;font-weight:700">%s</span> <span class="muted">可释放 · %d 个目录</span></div>`, human(lp.Bytes), len(lp.Dirs)))
@@ -250,8 +262,12 @@ func overviewPage(cfg Config, st *Store) string {
 		b.WriteString(`<span class="muted">只清临时/开发缓存/更新缓存/日志，全部进隔离区</span>`)
 		b.WriteString(`</div>`)
 	case !ls.Finished.IsZero():
-		b.WriteString(fmt.Sprintf(`<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap"><div><span class="big" style="font-size:26px;font-weight:700">%s</span> <span class="muted">上次实际释放 · 计划 %s</span></div>`,
-			human(ls.Freed), human(ls.Planned)))
+		last := "上次实际释放"
+		if ls.Stopped {
+			last = "上次手动停止前实际释放"
+		}
+		b.WriteString(fmt.Sprintf(`<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap"><div><span class="big" style="font-size:26px;font-weight:700">%s</span> <span class="muted">%s · 计划 %s</span></div>`,
+			human(ls.Freed), last, human(ls.Planned)))
 		b.WriteString(`<a class="btn" href="/lazy">查看 / 撤销</a>`)
 		b.WriteString(`<span class="muted">隔离区里的项 7 天内可还原</span></div>`)
 	default:
@@ -596,10 +612,17 @@ function actTick(){
     if(a.lazy && a.lazy.running){
       var gb = ((a.lazy.freed||0)/1073741824).toFixed(1);
       var pg = ((a.lazy.planned||0)/1073741824).toFixed(1);
-      h += actPill('/lazy', '● 清理中 ' + gb + ' / ' + pg + ' GB', '#ffd08a', '#332a17');
+      if(a.lazy.paused){
+        h += actPill('/lazy', '⏸ 已暂停 ' + gb + ' / ' + pg + ' GB', '#ffd08a', '#332a17');
+      } else if(a.lazy.stopping){
+        h += actPill('/lazy', '■ 正在停止 ' + gb + ' GB', '#ffb3c0', '#331a20');
+      } else {
+        h += actPill('/lazy', '● 清理中 ' + gb + ' / ' + pg + ' GB', '#ffd08a', '#332a17');
+      }
     } else if(a.lazy && a.lazy.finished && (Date.now()/1000 - a.lazy.finished) < 120 && a.lazy.freed > 0){
       var gb = (a.lazy.freed/1073741824).toFixed(1);
-      h += actPill('/lazy', '✓ 清理完成 ' + gb + ' GB', '#8ff0b8', '#173327');
+      var doneTxt = a.lazy.stopped ? '■ 已停止 ' : '✓ 清理完成 ';
+      h += actPill('/lazy', doneTxt + gb + ' GB', '#8ff0b8', '#173327');
     }
     el.innerHTML = h;
   }).catch(function(){});

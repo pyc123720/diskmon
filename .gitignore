@@ -23,3 +23,7 @@ pfx-password.txt
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# local toolchain cache (sandboxed builds)
+.gocache/
+.gotmp/

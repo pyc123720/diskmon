@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,9 @@ import (
 	"time"
 	"unsafe"
 )
+
+// errStopped 表示用户主动要求停止，不是失败：已经移走的部分应照常记账。
+var errStopped = errors.New("已停止")
 
 // ---------- 隔离区 ----------
 
@@ -293,17 +297,27 @@ func newID() string {
 
 // 执行隔离：移动而不是删除；同卷 rename，跨卷 copy+delete
 func (q *Quarantine) apply(cfg Config, path, reason string) (QEntry, error) {
-	return q.applyWithProgress(cfg, path, reason, nil)
+	return q.applyWithProgress(cfg, path, reason, nil, nil)
 }
 
-// applyWithProgress 与 apply 相同，但会回报移动进度（逐文件兜底时用于显示进度）
-func (q *Quarantine) applyWithProgress(cfg Config, path, reason string, onFile func(moved uint64, files, skipped int, cur string)) (QEntry, error) {
+// applyWithProgress 与 apply 相同，但会回报移动进度（逐文件兜底时用于显示进度）。
+// gate 是执行前的闸门：返回 true 才继续，返回 false 表示用户要求停止。
+// 停止时如果已经移走了一部分文件，仍会落盘记账（可撤销），并返回 errStopped。
+func (q *Quarantine) applyWithProgress(cfg Config, path, reason string, onFile func(moved uint64, files, skipped int, cur string), gate func() bool) (QEntry, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	r := rehearse(cfg, path)
+	if gate != nil && !gate() {
+		return QEntry{}, errStopped
+	}
+	// 这里只量大小和文件数，不逐文件做锁检测：锁检测在真正移动时自然会暴露，
+	// 逐文件 CreateFile 会把大目录的清理拖慢一个数量级，也让“暂停”迟迟不生效。
+	r, stopped := rehearseForApply(cfg, path, gate)
 	if r.Refuse != "" {
 		return QEntry{}, fmt.Errorf("%s", r.Refuse)
+	}
+	if stopped {
+		return QEntry{}, errStopped
 	}
 	if cfg.QuarantineMaxGB > 0 && q.totalBytes()+r.Bytes > uint64(cfg.QuarantineMaxGB)<<30 {
 		return QEntry{}, fmt.Errorf("隔离区已达上限 %d GB（当前 %s），请先还原或清理超期项",
@@ -315,15 +329,47 @@ func (q *Quarantine) applyWithProgress(cfg Config, path, reason string, onFile f
 		return QEntry{}, err
 	}
 	bytesMoved, filesMoved, skipped := r.Bytes, r.Files, 0
-	if err := movePath(path, dest); err != nil {
-		// 目录里有正在被占用的文件时，整目录 rename 会失败。
-		// 逐个文件移动：能移的先移走，占用中的跳过并如实计数。
-		b2, f2, s2, ferr := moveFilesIndividually(path, dest, onFile)
-		if ferr != nil {
-			return QEntry{}, ferr
+	var stopErr error
+	if err := os.Rename(path, dest); err != nil {
+		if isCrossDevice(err) {
+			// 跨卷：整目录一次复制过去，比逐文件复制快得多。
+			if serr := movePathSlow(path, dest, err); serr != nil {
+				return QEntry{}, serr
+			}
+		} else {
+			// 目录里有正在被占用的文件时，整目录 rename 会失败。
+			// 直接逐个文件移动：能移的先移走，占用中的跳过并如实计数。
+			// 不走 PowerShell / 复制回退，因为那条路在大目录上要先遍历或复制一遍才失败，
+			// 实测能卡 20 秒，期间暂停/停止都无法生效。
+			b2, f2, s2, ferr := moveFilesIndividually(path, dest, onFile, gate)
+			bytesMoved, filesMoved, skipped = b2, f2, s2
+			if f2 == 0 && !errors.Is(ferr, errStopped) {
+				// 一个都没搬动：可能是安全策略不允许本进程直接改文件，
+				// 再走 PowerShell / 复制回退（先把逐文件阶段留下的空壳/半截文件清掉）。
+				_ = os.RemoveAll(dest)
+				if serr := movePathSlow(path, dest, err); serr == nil {
+					bytesMoved, filesMoved, skipped = r.Bytes, r.Files, 0
+					ferr = nil
+				}
+			}
+			switch {
+			case errors.Is(ferr, errStopped):
+				stopErr = errStopped
+				if f2 == 0 {
+					_ = os.RemoveAll(filepath.Join(q.root, id)) // 什么都没移走，别留空壳
+					return QEntry{}, errStopped
+				}
+				pruneEmptyDirs(path, path)
+			case ferr != nil:
+				if f2 == 0 {
+					_ = os.RemoveAll(filepath.Join(q.root, id))
+					return QEntry{}, ferr
+				}
+				// 已经移走一部分：照常记账，避免隔离区里出现无法还原的“无主文件”。
+				stopErr = ferr
+				pruneEmptyDirs(path, path)
+			}
 		}
-		bytesMoved, filesMoved, skipped = b2, f2, s2
-		pruneEmptyDirs(path, path)
 	}
 	e := QEntry{ID: id, Original: path, Stored: dest, Bytes: bytesMoved, Files: filesMoved,
 		TS: time.Now().Unix(), Reason: reason, Skipped: skipped}
@@ -332,14 +378,77 @@ func (q *Quarantine) applyWithProgress(cfg Config, path, reason string, onFile f
 		_ = writeFileAtomic(filepath.Join(q.root, id, metaFileName), b)
 	}
 	q.append(e)
-	return e, nil
+	return e, stopErr
+}
+
+// rehearseForApply 是 apply 前的轻量测量：只统计大小/文件数，可在文件之间检查停止信号。
+// 真正的占用检测交给逐文件移动时处理（移不动就跳过并计数）。
+func rehearseForApply(cfg Config, path string, gate func() bool) (Rehearsal, bool) {
+	r := Rehearsal{Path: path}
+	cat, tier, refuse := guardPath(cfg, path)
+	r.Cat, r.Tier = cat, tier
+	if refuse != "" {
+		r.Refuse = refuse
+		return r, false
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		r.Refuse = "路径不存在或不可读：" + err.Error()
+		return r, false
+	}
+	if !st.IsDir() {
+		r.Files = 1
+		r.Bytes = uint64(st.Size())
+		return r, false
+	}
+	stopped := false
+	seen := 0
+	_ = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		seen++
+		if gate != nil && seen%200 == 0 && !gate() {
+			stopped = true
+			return filepath.SkipAll
+		}
+		if d.IsDir() {
+			if info, e := d.Info(); e == nil && isReparse(info) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info, e := d.Info(); e == nil && info.Mode().IsRegular() {
+			r.Files++
+			r.Bytes += uint64(info.Size())
+		}
+		return nil
+	})
+	return r, stopped
 }
 
 func movePath(src, dst string) error {
-	errRename := os.Rename(src, dst)
-	if errRename == nil {
+	if err := os.Rename(src, dst); err == nil {
 		return nil
+	} else {
+		return movePathSlow(src, dst, err)
 	}
+}
+
+// isCrossDevice 判断 rename 失败是否因为目标在另一个卷上。
+func isCrossDevice(err error) bool {
+	const errNotSameDevice = 17 // ERROR_NOT_SAME_DEVICE
+	var le *os.LinkError
+	if errors.As(err, &le) {
+		if errno, ok := le.Err.(syscall.Errno); ok {
+			return errno == errNotSameDevice
+		}
+	}
+	var errno syscall.Errno
+	return errors.As(err, &errno) && errno == errNotSameDevice
+}
+
+func movePathSlow(src, dst string, errRename error) error {
 	// 某些安全策略会拒绝本进程直接改动文件（例如仅允许白名单程序写盘）。
 	// 这时交给系统自带的 PowerShell 完成移动（跨卷也能处理）。
 	errPS := powershellMove(src, dst)
@@ -642,7 +751,8 @@ func pruneEmptyDirs(dir, stop string) {
 
 // moveFilesIndividually 把目录内容移进隔离区。
 // 先尝试整棵子树 rename（快），失败的子项才逐文件移动（跳过占用中的文件）。
-func moveFilesIndividually(src, dst string, onFile func(moved uint64, files, skipped int, cur string)) (uint64, int, int, error) {
+// gate 在每个文件/子树之间检查：返回 false 时立即停下，已移动的部分如实返回。
+func moveFilesIndividually(src, dst string, onFile func(moved uint64, files, skipped int, cur string), gate func() bool) (uint64, int, int, error) {
 	var moved uint64
 	files, skipped := 0, 0
 	report := func(cur string) {
@@ -650,11 +760,17 @@ func moveFilesIndividually(src, dst string, onFile func(moved uint64, files, ski
 			onFile(moved, files, skipped, cur)
 		}
 	}
+	stopCheck := func() bool {
+		return gate != nil && !gate()
+	}
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		return 0, 0, 0, err
 	}
 	for _, e := range entries {
+		if stopCheck() {
+			return moved, files, skipped, errStopped
+		}
 		child := filepath.Join(src, e.Name())
 		target := filepath.Join(dst, e.Name())
 		if e.IsDir() {
@@ -673,6 +789,9 @@ func moveFilesIndividually(src, dst string, onFile func(moved uint64, files, ski
 			walkErr := filepath.WalkDir(child, func(p string, d os.DirEntry, err error) error {
 				if err != nil || d.IsDir() {
 					return nil
+				}
+				if stopCheck() {
+					return errStopped
 				}
 				rel, rerr := filepath.Rel(src, p)
 				if rerr != nil {
@@ -700,6 +819,9 @@ func moveFilesIndividually(src, dst string, onFile func(moved uint64, files, ski
 				}
 				return nil
 			})
+			if errors.Is(walkErr, errStopped) {
+				return moved, files, skipped, errStopped
+			}
 			if walkErr != nil {
 				return moved, files, skipped, walkErr
 			}
