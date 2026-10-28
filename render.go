@@ -323,7 +323,7 @@ func renderPage(cfg Config, st *Store) string {
 				url.QueryEscape(e.ID)))
 		}
 		b.WriteString("</table>")
-		b.WriteString(fmt.Sprintf("<div style=\"margin-top:8px\"><a class=\"act danger\" href=\"/q/purge\">清理超期项（%d 天）</a></div>", cfg.QuarantineDays))
+		b.WriteString(fmt.Sprintf(`<form method="post" action="/q/purge" style="margin-top:8px" onsubmit="return confirm('永久删除隔离区里的超期项，不可恢复。继续？')"><button class="act danger" type="submit" style="cursor:pointer;font-family:inherit">清理超期项（%d 天）</button></form>`, cfg.QuarantineDays))
 	}
 	b.WriteString("</div>")
 

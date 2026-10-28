@@ -145,6 +145,7 @@ var zh2enExtra = map[string]string{
 	"计算于": "computed",
 	"重新分类": "Re-classify",
 	"按目录拆分": "Per folder",
+	"正在处理…": "Working…",
 	"处理": "Handle",
 	"图片": "Images",
 	"视频": "Videos",

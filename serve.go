@@ -433,6 +433,9 @@ func quarantineRoutes(cfg Config, st *Store, q *Quarantine, w http.ResponseWrite
 		_, _ = w.Write([]byte(opPage(cfg, st)))
 		return true
 	case "/q/purge":
+		if !methodGuard(w, r, "确认清理隔离区") {
+			return true
+		}
 		n, bytes := q.purge(cfg.QuarantineDays)
 		st.AddAlert("purge", fmt.Sprintf("清理隔离区 %d 项，释放 %s", n, human(bytes)))
 		http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -491,10 +494,14 @@ func rulesRoutes(cfg Config, st *Store, w http.ResponseWriter, r *http.Request) 
 				b.WriteString("<p><code>" + htmlEscape(rule.Path) + "</code></p>")
 				b.WriteString(fmt.Sprintf("<p>将删除该目录下超过 <b>%d</b> 天、且总量超过 <b>%d MB</b> 的文件。</p>", rule.KeepDays, rule.MaxSizeMB))
 				b.WriteString(`<div class="warn">这一步不可恢复（不进隔离区）。</div>`)
-				b.WriteString(`<a class="btn" style="border-color:#f5486a;color:#ff8fa3" href="/rules/run?name=` + urlQuery(name) + `&mode=real&go=1">确认执行</a>`)
+				b.WriteString(`<form method="post" action="/rules/run?name=` + urlQuery(name) + `&mode=real&go=1" style="display:inline">`)
+				b.WriteString(`<button class="btn" type="submit" style="border-color:#f5486a;color:#ff8fa3;cursor:pointer">确认执行</button></form>`)
 				b.WriteString(`<a class="btn" href="/rules">取消</a>`)
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				_, _ = w.Write([]byte(pageShell("确认执行", b.String())))
+				return true
+			}
+			if !methodGuard(w, r, "确认永久删除") {
 				return true
 			}
 			c := rule
@@ -615,11 +622,70 @@ func appRoutes(cfg Config, st *Store, q *Quarantine, w http.ResponseWriter, r *h
 	return false
 }
 
-func serveHTTP(cfg Config, st *Store) {
+// 本地服务只监听 127.0.0.1，但任何网页都能向它发请求。浏览器对跨站请求会带
+// Sec-Fetch-Site: cross-site，或一个与我们不同源的 Origin —— 据此拒掉，避免被
+// 别人借刀清理文件。命令行、MCP、curl 不带这些头，不受影响。
+func rejectCrossSite(w http.ResponseWriter, r *http.Request) bool {
+	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+		http.Error(w, "cross-site request blocked", http.StatusForbidden)
+		return true
+	}
+	if o := r.Header.Get("Origin"); o != "" && !sameOrigin(o, r.Host) {
+		http.Error(w, "cross-origin request blocked", http.StatusForbidden)
+		return true
+	}
+	return false
+}
+
+func sameOrigin(origin, host string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return u.Host == host || (isLoopbackHost(u.Host) && isLoopbackHost(host))
+}
+
+func isLoopbackHost(h string) bool {
+	host := h
+	if i := strings.LastIndex(host, ":"); i > 0 && !strings.HasSuffix(host, ":") {
+		host = host[:i]
+	}
+	switch host {
+	case "127.0.0.1", "localhost", "[::1]", "::1":
+		return true
+	}
+	return false
+}
+
+// 永久删除类操作只接受 POST：链接、刷新、预取都不该能把隔离区清空。
+func methodGuard(w http.ResponseWriter, r *http.Request, title string) bool {
+	if r.Method == http.MethodPost {
+		return true
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusMethodNotAllowed)
+	_, _ = w.Write([]byte(pageShell(title,
+		`<div class="warn">这个操作必须用页面上的按钮（POST）确认，不能用链接、刷新或外部请求触发。</div><a class="btn" href="/clean">返回清理中心</a>`)))
+	return false
+}
+
+func newHTTPHandler(cfg Config, st *Store) http.Handler {
 	q := openQuarantine(cfg)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		inc(&httpReqs)
+		if rejectCrossSite(w, r) {
+			return
+		}
+		if p := r.URL.Path; len(p) > 1 && strings.HasSuffix(p, "/") &&
+			(r.Method == http.MethodGet || r.Method == http.MethodHead) {
+			target := strings.TrimSuffix(p, "/")
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
+			return
+		}
 		uiTheme.Store(themeFromRequest(r))
 		curLang.Store(langFromRequest(r))
 		cfg = getConfig() // 每次请求都取最新配置，否则改设置后页面仍用启动时的快照
@@ -935,7 +1001,11 @@ func serveHTTP(cfg Config, st *Store) {
 			_, _ = w.Write([]byte(appShell("404", "", msg)))
 		}
 	})
-	srv := &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", cfg.Port), Handler: mux}
+	return mux
+}
+
+func serveHTTP(cfg Config, st *Store) {
+	srv := &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", cfg.Port), Handler: newHTTPHandler(cfg, st)}
 	if err := srv.ListenAndServe(); err != nil {
 		logf("http: %v", err)
 	}

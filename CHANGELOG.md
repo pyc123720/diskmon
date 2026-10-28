@@ -3,6 +3,20 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.5.7
+
+- **Security fix: cross-site requests are blocked.** The dashboard only listens on 127.0.0.1, but
+  any web page the user has open can still send requests to it. Requests carrying
+  `Sec-Fetch-Site: cross-site`, or an `Origin` that is not our own, are now rejected with 403 —
+  so a random page can no longer trigger cleanups. Command-line and MCP clients (no such headers)
+  are unaffected.
+- **Permanent deletion now requires POST.** `/q/purge` (drop expired quarantine items) and the
+  L2 rule "delete for real" confirmation were plain GET links: a refresh, a prefetch or an external
+  request could fire them. Both are now form buttons; GET gets 405.
+- Trailing-slash URLs such as `/clean/` now redirect (301) instead of 404.
+- Loading overlay in English mode says "Working…" instead of "正在Handle…".
+- Tests: cross-site rejection, POST-only purge, trailing-slash redirect, origin matching.
+
 ## 2.5.6
 
 - **"今日建议" rewrite.** The card used to be a fixed priority ladder, so it showed the same
