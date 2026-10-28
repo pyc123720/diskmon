@@ -83,7 +83,7 @@ func lazyGate() bool {
 func lazyPause() bool {
 	lazyMu.Lock()
 	defer lazyMu.Unlock()
-	if !lazyCur.Running || lazyCur.Paused || lazyCur.Stopping {
+	if !lazyCur.Running || lazyCur.Paused || lazyCur.Stopping || lazyCur.Measuring {
 		return false
 	}
 	lazyCur.Paused = true
@@ -176,6 +176,11 @@ func startLazy(cfg Config, st *Store, q *Quarantine) bool {
 
 	started := time.Now()
 	lazyMu.Lock()
+	if lazyCur.Stopping { // 测量期间用户点了停止：直接结束，不开始搬运
+		lazyCur = lazyRun{}
+		lazyMu.Unlock()
+		return false
+	}
 	lazyCur = lazyRun{Running: true, Started: started, Total: len(dirs), Planned: planned,
 		Snapshot: p.Bytes, PlanPartial: !measured}
 	lazyMu.Unlock()
@@ -429,7 +434,7 @@ func lazyResultsTable(results []lazyDirResult, stopped bool) string {
 // lazyRunningButtons 是进度卡片里的暂停/继续/停止按钮。
 func lazyRunningButtons(s lazyRun) string {
 	if s.Stopping {
-		return `<div class="muted">正在停止：等当前文件移动完成就停下，已移走的都在隔离区里。</div>`
+		return ""
 	}
 	var b strings.Builder
 	b.WriteString(`<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">`)
@@ -472,18 +477,37 @@ func lazyPage(cfg Config, st *Store) string {
 			b.WriteString(`</div><meta http-equiv="refresh" content="2">`)
 			return appShell("懒人清理", "clean", b.String())
 		}
+		switch {
+		case s.Stopping:
+			b.WriteString(`<div class="warn" style="margin-top:6px">正在停止：当前文件收尾后结束本轮，剩余目录不再处理。已经移走的内容都在隔离区里，可以撤销。</div>`)
+		case s.Paused:
+			b.WriteString(fmt.Sprintf(`<div class="warn" style="margin-top:6px">已暂停：进度停在这里，不会继续移动文件。点「继续清理」接着做，或点「停止清理」结束本轮（已移走的仍可撤销）。</div>`))
+		}
 		b.WriteString(fmt.Sprintf(`<p>已移入隔离区 <b>%s</b> / 计划 <b>%s</b> · %d 个文件 · 跳过 %d 个 · 目录 %d/%d</p>`,
 			human(s.Freed), human(s.Planned), s.Files, s.SkippedFiles, s.Done, s.Total))
-		b.WriteString(fmt.Sprintf(`<div style="height:10px;background:#1c212b;border-radius:6px;overflow:hidden;margin:12px 0"><div style="height:100%%;width:%d%%;background:#33c179;transition:width .4s"></div></div>`, pct))
+		barColor := "#33c179"
+		if s.Paused {
+			barColor = "#f5a524"
+		}
+		b.WriteString(fmt.Sprintf(`<div style="height:10px;background:#1c212b;border-radius:6px;overflow:hidden;margin:12px 0"><div style="height:100%%;width:%d%%;background:%s;transition:width .4s"></div></div>`,
+			pct, barColor))
 		if s.Freed > s.Planned && s.Planned > 0 {
 			b.WriteString(fmt.Sprintf(`<div class="muted">已经超过开始时实测的计划 %s：这些目录在清理过程中还在写入新文件（临时文件/缓存一直在长），多出来的部分也一并进了隔离区。</div>`, human(s.Freed-s.Planned)))
 		}
 		if s.Current != "" {
-			b.WriteString(`<div class="muted" style="font-family:ui-monospace,Consolas,monospace;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">` + htmlEscape(s.Current) + `</div>`)
+			b.WriteString(`<div class="muted" style="font-family:ui-monospace,Consolas,monospace;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">当前文件：` + htmlEscape(s.Current) + `</div>`)
 		}
 		b.WriteString(lazyRunningButtons(s))
-		b.WriteString(`<div class="muted" style="margin-top:10px">暂停会停在下一个文件之前（正在移动的那个文件会先完成）。停止后已移走的仍可在隔离区撤销。页面每 2 秒自动刷新；关闭也没关系，清理会在后台继续。</div>`)
-		b.WriteString(`</div><meta http-equiv="refresh" content="2">`)
+		if !s.Stopping {
+			b.WriteString(`<div class="muted" style="margin-top:8px">「暂停」只是停住，随时可以继续；「停止清理」会结束本轮，已移走的仍在隔离区、可撤销。</div>`)
+		}
+		b.WriteString(`<div class="muted" style="margin-top:6px">页面每秒刷新；关闭也没关系，清理会在后台继续。</div>`)
+		b.WriteString(`</div>`)
+		if s.Stopping {
+			// 停止是很快的：轮询到本轮结束就立刻切到结果页，不用等整页刷新
+			b.WriteString(`<script>setTimeout(function(){fetch('/api/actions').then(function(r){return r.json()}).then(function(a){if(!a.lazy||!a.lazy.running){location.reload()}}).catch(function(){})},600)</script>`)
+		}
+		b.WriteString(`<meta http-equiv="refresh" content="1">`)
 		return appShell("懒人清理", "clean", b.String())
 	}
 

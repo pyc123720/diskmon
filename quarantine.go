@@ -39,14 +39,14 @@ const metaFileName = ".diskmon-meta.json"
 type Rehearsal struct {
 	Path      string
 	Truncated bool
-	Files    int
-	Bytes    uint64
-	Locked   []string
-	Skipped  int
-	TopFiles []FileEntry
-	Refuse   string
-	Cat      string
-	Tier     string
+	Files     int
+	Bytes     uint64
+	Locked    []string
+	Skipped   int
+	TopFiles  []FileEntry
+	Refuse    string
+	Cat       string
+	Tier      string
 }
 
 type Quarantine struct {
@@ -331,44 +331,39 @@ func (q *Quarantine) applyWithProgress(cfg Config, path, reason string, onFile f
 	bytesMoved, filesMoved, skipped := r.Bytes, r.Files, 0
 	var stopErr error
 	if err := os.Rename(path, dest); err != nil {
-		if isCrossDevice(err) {
-			// 跨卷：整目录一次复制过去，比逐文件复制快得多。
-			if serr := movePathSlow(path, dest, err); serr != nil {
-				return QEntry{}, serr
+		// 目录里有正在被占用的文件、或目标在另一个卷上时，整目录 rename 会失败。
+		// 直接逐个文件移动/流式复制：能移的先移走，占用中的跳过并如实计数；
+		// 复制过程中每块都检查暂停/停止，进度和暂停键才有意义。
+		b2, f2, s2, ferr := moveFilesIndividually(path, dest, onFile, gate)
+		bytesMoved, filesMoved, skipped = b2, f2, s2
+		if f2 == 0 && !errors.Is(ferr, errStopped) {
+			// 一个都没搬动：可能是安全策略不允许本进程直接改文件，
+			// 再走 PowerShell / 复制回退（先把逐文件阶段留下的空壳/半截文件清掉）。
+			_ = os.RemoveAll(dest)
+			if serr := movePathSlow(path, dest, err); serr == nil {
+				bytesMoved, filesMoved, skipped = r.Bytes, r.Files, 0
+				ferr = nil
 			}
-		} else {
-			// 目录里有正在被占用的文件时，整目录 rename 会失败。
-			// 直接逐个文件移动：能移的先移走，占用中的跳过并如实计数。
-			// 不走 PowerShell / 复制回退，因为那条路在大目录上要先遍历或复制一遍才失败，
-			// 实测能卡 20 秒，期间暂停/停止都无法生效。
-			b2, f2, s2, ferr := moveFilesIndividually(path, dest, onFile, gate)
-			bytesMoved, filesMoved, skipped = b2, f2, s2
-			if f2 == 0 && !errors.Is(ferr, errStopped) {
-				// 一个都没搬动：可能是安全策略不允许本进程直接改文件，
-				// 再走 PowerShell / 复制回退（先把逐文件阶段留下的空壳/半截文件清掉）。
-				_ = os.RemoveAll(dest)
-				if serr := movePathSlow(path, dest, err); serr == nil {
-					bytesMoved, filesMoved, skipped = r.Bytes, r.Files, 0
-					ferr = nil
-				}
+		}
+		switch {
+		case errors.Is(ferr, errStopped):
+			stopErr = errStopped
+			if f2 == 0 {
+				_ = os.RemoveAll(filepath.Join(q.root, id)) // 什么都没移走，别留空壳
+				return QEntry{}, errStopped
 			}
-			switch {
-			case errors.Is(ferr, errStopped):
-				stopErr = errStopped
-				if f2 == 0 {
-					_ = os.RemoveAll(filepath.Join(q.root, id)) // 什么都没移走，别留空壳
-					return QEntry{}, errStopped
-				}
-				pruneEmptyDirs(path, path)
-			case ferr != nil:
-				if f2 == 0 {
-					_ = os.RemoveAll(filepath.Join(q.root, id))
-					return QEntry{}, ferr
-				}
-				// 已经移走一部分：照常记账，避免隔离区里出现无法还原的“无主文件”。
-				stopErr = ferr
-				pruneEmptyDirs(path, path)
+			removeEmptyTree(path)
+		case ferr != nil:
+			if f2 == 0 {
+				_ = os.RemoveAll(filepath.Join(q.root, id))
+				return QEntry{}, ferr
 			}
+			// 已经移走一部分：照常记账，避免隔离区里出现无法还原的“无主文件”。
+			stopErr = ferr
+			removeEmptyTree(path)
+		default:
+			// 逐个文件搬完后源目录可能只剩空壳；清掉，别让页面看起来“没清干净”。
+			removeEmptyTree(path)
 		}
 	}
 	e := QEntry{ID: id, Original: path, Stored: dest, Bytes: bytesMoved, Files: filesMoved,
@@ -433,19 +428,6 @@ func movePath(src, dst string) error {
 	} else {
 		return movePathSlow(src, dst, err)
 	}
-}
-
-// isCrossDevice 判断 rename 失败是否因为目标在另一个卷上。
-func isCrossDevice(err error) bool {
-	const errNotSameDevice = 17 // ERROR_NOT_SAME_DEVICE
-	var le *os.LinkError
-	if errors.As(err, &le) {
-		if errno, ok := le.Err.(syscall.Errno); ok {
-			return errno == errNotSameDevice
-		}
-	}
-	var errno syscall.Errno
-	return errors.As(err, &errno) && errno == errNotSameDevice
 }
 
 func movePathSlow(src, dst string, errRename error) error {
@@ -749,20 +731,73 @@ func pruneEmptyDirs(dir, stop string) {
 	}
 }
 
+// removeEmptyTree 自下而上删掉已经空了的目录（逐文件移动后调用）。
+// 只删空目录：还有被占用文件没搬走的目录会保留下来。
+func removeEmptyTree(root string) {
+	var dirs []string
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			dirs = append(dirs, p)
+		}
+		return nil
+	})
+	for i := len(dirs) - 1; i >= 0; i-- {
+		_ = os.Remove(dirs[i]) // 非空会失败，正好保留
+	}
+}
+
 // moveFilesIndividually 把目录内容移进隔离区。
-// 先尝试整棵子树 rename（快），失败的子项才逐文件移动（跳过占用中的文件）。
-// gate 在每个文件/子树之间检查：返回 false 时立即停下，已移动的部分如实返回。
+// 先尝试整棵子树 rename（快）；失败（被占用 / 跨卷）才逐个文件移动，
+// 跨卷时流式复制，每 1 MB 检查一次暂停/停止并回报进度。
+// gate 返回 false 时立即停下，已完成的文件如实返回（半截文件会被删掉）。
 func moveFilesIndividually(src, dst string, onFile func(moved uint64, files, skipped int, cur string), gate func() bool) (uint64, int, int, error) {
 	var moved uint64
 	files, skipped := 0, 0
-	report := func(cur string) {
-		if onFile != nil {
-			onFile(moved, files, skipped, cur)
+	lastReport := time.Time{}
+	report := func(cur string, force bool) {
+		if onFile == nil {
+			return
 		}
+		if !force && time.Since(lastReport) < 120*time.Millisecond {
+			return
+		}
+		lastReport = time.Now()
+		onFile(moved, files, skipped, cur)
 	}
 	stopCheck := func() bool {
 		return gate != nil && !gate()
 	}
+
+	// moveOne 移动单个文件：同卷 rename 是瞬时的；跨卷/被占用时流式复制。
+	moveOne := func(p, t string) error {
+		if err := os.Rename(p, t); err == nil {
+			if info, err := os.Stat(t); err == nil {
+				moved += uint64(info.Size())
+			}
+			files++
+			report(p, false)
+			return nil
+		}
+		written, err := copyFileStream(p, t, gate, func(n uint64) {
+			if onFile != nil && time.Since(lastReport) >= 120*time.Millisecond {
+				lastReport = time.Now()
+				onFile(moved+n, files, skipped, p)
+			}
+		})
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(p); err != nil {
+			// 复制成功但源文件删不掉（安全策略）：把副本删掉，别留下两份数据
+			_ = os.Remove(t)
+			return fmt.Errorf("删除源文件失败：%v", err)
+		}
+		moved += written
+		files++
+		report(p, false)
+		return nil
+	}
+
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		return 0, 0, 0, err
@@ -782,10 +817,10 @@ func moveFilesIndividually(src, dst string, onFile func(moved uint64, files, ski
 				size, cnt := dirStats(target)
 				moved += size
 				files += cnt
-				report(child)
+				report(child, true)
 				continue
 			}
-			// 子树里有文件被占用：逐文件搬
+			// 子树里有文件被占用（或跨卷）：逐文件搬
 			walkErr := filepath.WalkDir(child, func(p string, d os.DirEntry, err error) error {
 				if err != nil || d.IsDir() {
 					return nil
@@ -803,19 +838,11 @@ func moveFilesIndividually(src, dst string, onFile func(moved uint64, files, ski
 					skipped++
 					return nil
 				}
-				if err := os.Rename(p, t); err != nil {
-					if err := copyFile(p, t); err != nil {
-						skipped++
-						return nil
+				if err := moveOne(p, t); err != nil {
+					if errors.Is(err, errStopped) {
+						return errStopped
 					}
-					_ = os.Remove(p)
-				}
-				if info, err := os.Stat(t); err == nil {
-					moved += uint64(info.Size())
-				}
-				files++
-				if files%25 == 0 {
-					report(p)
+					skipped++
 				}
 				return nil
 			})
@@ -825,32 +852,76 @@ func moveFilesIndividually(src, dst string, onFile func(moved uint64, files, ski
 			if walkErr != nil {
 				return moved, files, skipped, walkErr
 			}
-			report(child)
+			report(child, true)
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			skipped++
 			continue
 		}
-		if err := os.Rename(child, target); err != nil {
-			if err := copyFile(child, target); err != nil {
-				skipped++
-				continue
+		if err := moveOne(child, target); err != nil {
+			if errors.Is(err, errStopped) {
+				return moved, files, skipped, errStopped
 			}
-			_ = os.Remove(child)
-		}
-		if info, err := os.Stat(target); err == nil {
-			moved += uint64(info.Size())
-		}
-		files++
-		if files%25 == 0 {
-			report(child)
+			skipped++
 		}
 	}
 	if files == 0 {
 		return 0, 0, skipped, fmt.Errorf("所有文件都被占用，无法移动（%d 个跳过）", skipped)
 	}
 	return moved, files, skipped, nil
+}
+
+// copyFileStream 分块复制文件：每读一块检查暂停/停止，进度也随之更新。
+// 中途失败或被停止时删掉半截目标文件，源文件保持原样。
+func copyFileStream(src, dst string, gate func() bool, onChunk func(written uint64)) (uint64, error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return 0, err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return 0, err
+	}
+	done := false
+	defer func() {
+		_ = out.Close()
+		if !done {
+			_ = os.Remove(dst)
+		}
+	}()
+	buf := make([]byte, 1<<20)
+	var written uint64
+	for {
+		if gate != nil && !gate() {
+			return written, errStopped
+		}
+		n, rerr := in.Read(buf)
+		if n > 0 {
+			if _, werr := out.Write(buf[:n]); werr != nil {
+				return written, werr
+			}
+			written += uint64(n)
+			if onChunk != nil {
+				onChunk(written)
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return written, rerr
+		}
+	}
+	if err := out.Close(); err != nil {
+		return written, err
+	}
+	done = true
+	if st, err := in.Stat(); err == nil {
+		_ = os.Chtimes(dst, st.ModTime(), st.ModTime())
+	}
+	return written, nil
 }
 
 // dirStats 统计目录大小与文件数（用于子树 rename 后记账）

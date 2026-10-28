@@ -151,6 +151,30 @@ func TestMoveFilesIndividuallyStop(t *testing.T) {
 	}
 }
 
+func TestCopyFileStreamStop(t *testing.T) {
+	base := t.TempDir()
+	src := filepath.Join(base, "big.bin")
+	dst := filepath.Join(base, "copy.bin")
+	if err := os.WriteFile(src, make([]byte, 5<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	gate := func() bool { calls++; return calls <= 2 }
+	written, err := copyFileStream(src, dst, gate, nil)
+	if !errors.Is(err, errStopped) {
+		t.Fatalf("应在中途停止，实际 err=%v", err)
+	}
+	if written == 0 || written >= 5<<20 {
+		t.Fatalf("应只复制一部分，实际 %d 字节", written)
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Fatal("停止后应删掉半截目标文件")
+	}
+	if fi, err := os.Stat(src); err != nil || fi.Size() != 5<<20 {
+		t.Fatal("源文件应保持完整")
+	}
+}
+
 func TestLazyDeltaText(t *testing.T) {
 	more := lazyDeltaText(lazyRun{Planned: 100 << 20, Freed: 130 << 20})
 	if !strings.Contains(more, "多") {

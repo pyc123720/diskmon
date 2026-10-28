@@ -20,6 +20,14 @@ the first public release is 1.4.x.
   * Quarantine now measures size without opening every file for a lock check first — much faster on
     large caches — and lock detection still happens when a file cannot actually be moved.
 - Fixed the completion alert reporting the failure count as the skipped-file count.
+- **Pause and stop now work on cross-volume quarantine too.** When the quarantine lives on another
+  drive (the common case), files are streamed in 1 MB chunks with a pause/stop check before each
+  chunk and live progress, instead of one opaque `PowerShell Move-Item` per folder that could not be
+  interrupted. Source folders left empty by a per-file move are removed.
+- **The running page distinguishes the three states instead of looking the same.** Paused shows a
+  yellow bar, "已暂停" plus 继续清理 / 停止清理; stopping shows "正在停止…" and jumps to the result as
+  soon as the run ends. Both actions take effect within roughly one file (unit-tested: a 5 MB copy
+  stops mid-stream and the half-written destination is removed).
 - **Single-instance handling fixed.** `CreateMutexW` returns a valid handle even when the named
   mutex already exists; only `ERROR_ALREADY_EXISTS` says another instance is running. The old check
   let a second copy start a second tray and fight over the port. Now an existing instance makes the
