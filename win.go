@@ -478,11 +478,17 @@ func runTray(cfg Config, st *Store) {
 	curCfg, curStore = cfg, st
 	useToast.Store(cfg.UseToast)
 
-	// 单实例
+	// 单实例。CreateMutexW 在锁已存在时仍会返回句柄，只有 GetLastError 是
+	// ERROR_ALREADY_EXISTS(183) 才说明已有实例 —— 这时直接把看板打开，而不是
+	// 静默退出：用户双击桌面图标时，期望看到的就是看板。
 	name, _ := syscall.UTF16PtrFromString("Local\\diskmon-go-single")
-	h, _, _ := pCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(name)))
+	h, _, e := pCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(name)))
 	if h == 0 {
-		fmt.Println("已有实例在运行")
+		fmt.Println("无法创建单实例锁")
+		return
+	}
+	if errno, ok := e.(syscall.Errno); ok && errno == 183 {
+		openAppWindow(cfg.Port)
 		return
 	}
 	_ = h

@@ -20,6 +20,10 @@ the first public release is 1.4.x.
   * Quarantine now measures size without opening every file for a lock check first — much faster on
     large caches — and lock detection still happens when a file cannot actually be moved.
 - Fixed the completion alert reporting the failure count as the skipped-file count.
+- **Single-instance handling fixed.** `CreateMutexW` returns a valid handle even when the named
+  mutex already exists; only `ERROR_ALREADY_EXISTS` says another instance is running. The old check
+  let a second copy start a second tray and fight over the port. Now an existing instance makes the
+  new process open the dashboard and exit — so double-clicking the shortcut always "opens" it.
 - Tests: pause/resume/stop gate, measured-plan behaviour, planned-vs-actual explanations.
 
 ## 2.5.7
