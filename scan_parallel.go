@@ -5,63 +5,129 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 )
 
 // ---------- 并行扫描 + 合并 ----------
 
-// 每个顶层子树一个 worker。Windows 盘 I/O 并行收益有限，3 个比较稳。
+// scanWorkers 是 scanVolume 的并发上限，由 ScanRootCached 的 sem 使用。
+// 注意：真正决定并发的是 ScanRootCached（按顶层子树并发），不是这里。
 const scanWorkers = 3
 
 var lastScanSeq atomic.Int64
 
-func scanRootParallel(cfg Config) *Scan {
-	entries, err := os.ReadDir(cfg.Root)
+// scanJob 是一个可被 worker 抢占的扫描任务。
+// parent 记住它属于哪个顶层子树——结果要按子树归并回去，缓存键才不会失效。
+type scanJob struct {
+	path   string
+	parent string
+}
+
+// buildJobs 把一个顶层子树拆成「它的直接子目录」级任务。
+// 拆不动（读不了、或子目录少于 2 个）就退化成扫它自己，避免拆了反而更慢。
+func buildJobs(child string) []scanJob {
+	subs, err := os.ReadDir(child)
 	if err != nil {
-		return scanVolume(cfg, cfg.Root)
+		return []scanJob{{path: child, parent: child}}
 	}
-	var children []string
-	for _, e := range entries {
+	jobs := make([]scanJob, 0, len(subs))
+	for _, e := range subs {
 		if !e.IsDir() {
 			continue
 		}
-		if strings.HasPrefix(e.Name(), "$") { // $Recycle.Bin 等
+		if info, ierr := e.Info(); ierr == nil && isReparse(info) {
 			continue
 		}
-		p := filepath.Join(cfg.Root, e.Name()) + string(os.PathSeparator) // 子扫描根必须带分隔符，否则拼出的路径会缺反斜杠
-		if info, ierr := e.Info(); ierr == nil && isReparse(info) {
-			continue // 顶层 junction/symlink 不扫
+		jobs = append(jobs, scanJob{
+			path:   filepath.Join(child, e.Name()) + string(os.PathSeparator),
+			parent: child,
+		})
+	}
+	if len(jobs) < 2 {
+		return []scanJob{{path: child, parent: child}}
+	}
+	return jobs
+}
+
+// mergeChildParts 把「一个顶层子树的若干分片」归并回一个 Scan，供增量缓存按子树存取。
+// 拆成多个任务时子树自身不再作为扫描根出现，所以 Dirs 要补回 1。
+func mergeChildParts(child string, parts []*Scan) *Scan {
+	if len(parts) == 1 && strings.EqualFold(parts[0].Root, child) {
+		return parts[0] // 没拆开，原样返回
+	}
+	m := mergeScans(child, parts)
+	m.Dirs++
+	return m
+}
+
+// listRootFiles 列出扫描根下的「直接文件」（pagefile.sys / hiberfil.sys / bootmgr 等）。
+// `$` 开头的系统伪文件跳过。
+func listRootFiles(root string) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
 		}
-		children = append(children, p)
+		if strings.HasPrefix(e.Name(), "$") {
+			continue
+		}
+		out = append(out, filepath.Join(root, e.Name()))
 	}
-	if len(children) < 2 {
-		return scanVolume(cfg, cfg.Root)
-	}
+	return out
+}
 
-	parts := make([]*Scan, len(children))
-	sem := make(chan struct{}, scanWorkers)
-	var wg sync.WaitGroup
-	for i, c := range children {
-		wg.Add(1)
-		go func(i int, path string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			if scanCancelled() {
-				return
-			}
-			parts[i] = scanVolume(cfg, path)
-		}(i, c)
+// scanRootFiles 只统计扫描根目录下的直接文件，不递归。
+func scanRootFiles(cfg Config, paths []string) *Scan {
+	if len(paths) == 0 {
+		return nil
 	}
-	wg.Wait()
-
-	parts = compactScans(parts)
-	merged := mergeScans(cfg.Root, parts)
-	// 根目录自身也算一个目录
-	merged.Dirs++
-	return merged
+	sc := &Scan{
+		Root: cfg.Root, TS: time.Now().Unix(),
+		Cats: map[string]uint64{}, CatsShared: map[string]uint64{},
+		Owners:    map[string]uint64{},
+		Protected: map[string]uint64{}, DayWrites: map[string]uint64{},
+	}
+	hl := activeHardlinks()
+	var sharedBytes uint64
+	rootCat := classify(strings.ToLower(strings.TrimRight(cfg.Root, `\`)) + `\`)
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil || !info.Mode().IsRegular() {
+			sc.Errors++
+			continue
+		}
+		size := uint64(info.Size())
+		if size == 0 {
+			continue
+		}
+		sc.Total += size
+		sc.Files++
+		cat := rootCat
+		switch strings.ToLower(filepath.Base(p)) {
+		case "hiberfil.sys", "swapfile.sys":
+			cat = "system_hiber"
+		case "pagefile.sys":
+			cat = "system_pagefile"
+		case "memory.dmp":
+			cat = "logs_dumps"
+		}
+		sc.Cats[cat] += size
+		if size >= 32<<20 {
+			sc.TopFiles = append(sc.TopFiles, FileEntry{Path: p, Bytes: size, MTime: info.ModTime().Unix()})
+		}
+		if hardlinkProbeMin > 0 && size >= hardlinkProbeMin && hl.observe(p, size) {
+			sharedBytes += size
+			sc.CatsShared[cat] += size
+		}
+	}
+	sc.Shared = sharedBytes
+	sc.Unique = uniqueBytes(sc.Total, sc.Shared)
+	return sc
 }
 
 func compactScans(parts []*Scan) []*Scan {
@@ -77,7 +143,8 @@ func compactScans(parts []*Scan) []*Scan {
 func mergeScans(root string, parts []*Scan) *Scan {
 	m := &Scan{
 		Root: root, TS: time.Now().Unix(),
-		Cats: map[string]uint64{}, Owners: map[string]uint64{},
+		Cats: map[string]uint64{}, CatsShared: map[string]uint64{},
+		Owners:    map[string]uint64{},
 		Protected: map[string]uint64{}, DayWrites: map[string]uint64{},
 	}
 	for _, p := range parts {
@@ -87,8 +154,15 @@ func mergeScans(root string, parts []*Scan) *Scan {
 		m.Errors += p.Errors
 		m.Used += p.Used
 		m.Free += p.Free
+		m.Shared += p.Shared
+		if p.HlProbeMB > m.HlProbeMB {
+			m.HlProbeMB = p.HlProbeMB
+		}
 		for k, v := range p.Cats {
 			m.Cats[k] += v
+		}
+		for k, v := range p.CatsShared {
+			m.CatsShared[k] += v
 		}
 		for k, v := range p.Owners {
 			m.Owners[k] += v
@@ -112,6 +186,7 @@ func mergeScans(root string, parts []*Scan) *Scan {
 	if len(m.TopFiles) > 300 {
 		m.TopFiles = m.TopFiles[:300]
 	}
+	m.Unique = uniqueBytes(m.Total, m.Shared)
 	return m
 }
 
