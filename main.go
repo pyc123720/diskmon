@@ -257,6 +257,13 @@ func main() {
 		}
 	case "leftovers":
 		printLeftovers(cfg, st)
+	case "winapp2":
+		if len(os.Args) < 3 {
+			fmt.Println("用法: diskmon-go.exe winapp2 <winapp2.ini>")
+			fmt.Println("只解析并列出规则，不删除任何文件。")
+			return
+		}
+		reportWinapp2(os.Args[2])
 	case "mft-dump":
 		letter := "C"
 		if len(os.Args) > 2 {
@@ -346,5 +353,6 @@ func main() {
 		fmt.Println("用法：diskmon-go [tray|scan|report|report-open|serve|watch|status|probe|diff|apps|procs|cases]")
 		fmt.Println("      diskmon-go mft-dump [C:] [nocompare|paths|文件名]  只读 MFT 直读 + 对账（需管理员）")
 		fmt.Println("      diskmon-go walk-count [C:]                        只做目录遍历计数，报出自身盲区（不需管理员）")
+		fmt.Println("      diskmon-go winapp2 <file.ini> 解析 winapp2.ini 规则（只解析不删）")
 	}
 }
