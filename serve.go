@@ -845,8 +845,13 @@ func newHTTPHandler(cfg Config, st *Store) http.Handler {
 			if page, ok := sectionPage(cfg, st, key); ok {
 				_, _ = w.Write([]byte(page))
 			} else {
+				// 这里以前只回一行裸文本，而其它 404 走的是完整页面——
+				// 同一个应用两种 404 形态，用户在浏览器里看到的是一行没有样式的字。
 				w.WriteHeader(404)
-				_, _ = w.Write([]byte("未知分区：" + htmlEscape(key) + "　<a href=\"/detail\">返回</a>"))
+				_, _ = w.Write([]byte(pageShell("没有这个分区",
+					`<div class="warn">没有这个分区：`+htmlEscape(key)+`</div>`+
+						`<p class="muted">可能链接过期了，或者手输错了。</p>`+
+						`<a class="btn" href="/detail">返回全部数据</a>`)))
 			}
 			return
 		}
