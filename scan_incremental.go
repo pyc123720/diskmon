@@ -134,6 +134,13 @@ func usnCacheStillClean(cache *scanCache, root string) (bool, string) {
 	if okV, _ := usnAnchorVerdict(cache.Usn, cur); okV && cur.Next > cache.Usn.Next {
 		n, mod, derr := usnDeltaReader(letter, cache.Usn.Next, cur.Next, cache.Usn.JournalID)
 		d = deltaResult{examined: true, records: n, modifying: mod, err: derr}
+		// t14：读完再查一次坐标。这一次**必须重新 syscall**——复用上面那次 cur 就什么都看不出来，
+		// 而「读的过程中日志被 purge」正是这次要堵的盲区。只有真的读了记录才走这里；
+		// cur.Next == cache.Usn.Next 的快路径压根不进这个分支，不会多付一次调用。
+		post, perr := usnAnchorReader(letter)
+		if okRe, why := recheckReadWindow(cache.Usn, post, perr); !okRe {
+			return false, why
+		}
 	}
 	return usnAnchorClean(cache.Usn, cur, d)
 }
@@ -155,9 +162,19 @@ func trustworthyAnchor(letter string, before usnAnchor, beforeErr error) usnAnch
 		return usnAnchor{}
 	}
 	var d deltaResult
+	readRecords := false
 	if okV, _ := usnAnchorVerdict(before, after); okV && after.Next > before.Next {
 		n, mod, derr := usnDeltaReader(letter, before.Next, after.Next, before.JournalID)
 		d = deltaResult{examined: true, records: n, modifying: mod, err: derr}
+		readRecords = true
+	}
+	if readRecords {
+		// t14：读了记录就要复查一次坐标（原因见 recheckReadWindow）。
+		// 没读记录时（after.Next == before.Next）不进这里，零改动路径不多付 syscall。
+		post, perr := usnAnchorReader(letter)
+		if okRe, _ := recheckReadWindow(before, post, perr); !okRe {
+			return usnAnchor{}
+		}
 	}
 	if clean, _ := usnAnchorClean(before, after, d); !clean {
 		// 扫描期间有改动：这份快照可能是「中间某个瞬间」的样子。

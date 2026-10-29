@@ -379,6 +379,40 @@ func usnAnchorVerdict(prev, cur usnAnchor) (bool, string) {
 	return true, ""
 }
 
+// recheckReadWindow 是 t14：**读完记录之后**再查一次坐标，判断这段记录是不是「残缺的一段」。
+//
+// 为什么非得再读一次：读之前那次坐标只说明「从锚点到那时为止，日志里还有我们要的那一段」。
+// 读的过程中日志完全可能被 purge 掉——USN 记录本身不保证连续，读回来的东西照样“像一段完整记录”，
+// 我们却已经丢了中间一块，而且不会报错。只有**读完之后**的坐标能看出来：
+// 如果我们连自己读的起点（prev.Next）都已经被挤出窗口，那份读数就不能用。
+//
+// 三条拒绝，每条都对应一个具体的坏情况：
+//  1. 复查读不到 —— 不知道，回落；
+//  2. journalID 变了 —— 读的可能是另一本日志（旧日志被删重建），回落；
+//  3. post.First > prev.Next —— 锚点之后那一段在读取期间滚出了窗口，读到的是残缺的一段，回落。
+//
+// 调用方必须传**读完之后重新查的**坐标，不许把开头那次读到的坐标复用进来——
+// 复用它就什么都看不出来，那正是这次要修的毛病。
+func recheckReadWindow(prev, post usnAnchor, err error) (bool, string) {
+	if err != nil {
+		// 复查失败 = 不知道读到的全不全，只能回落。
+		return false, "读完 USN 记录后复查坐标失败：" + err.Error()
+	}
+	if !post.valid() {
+		return false, fmt.Sprintf("读完 USN 记录后复查到的坐标不可信（id=%d first=%d next=%d）",
+			post.JournalID, post.First, post.Next)
+	}
+	if post.JournalID != prev.JournalID {
+		return false, fmt.Sprintf("读取期间 USN 日志被重建（journalID %d → %d），读到的不一定是同一本日志",
+			prev.JournalID, post.JournalID)
+	}
+	if post.First > prev.Next {
+		return false, fmt.Sprintf("读取期间锚点之后的记录被挤出日志窗口（复查 First=%d > 锚点 Next=%d），读到的是残缺的一段",
+			post.First, prev.Next)
+	}
+	return true, ""
+}
+
 // deltaResult 是「锚点之后那一小段 USN 记录」的判定输入。
 // 单独抽成一个值，是为了让整条判定链能离线测：真正读盘只发生在填它的那一层。
 type deltaResult struct {
