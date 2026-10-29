@@ -421,6 +421,7 @@ func cleanPage(cfg Config, st *Store, cat string) string {
 	b.WriteString(`<div class="card"><h2>媒体分类</h2><p class="muted">按图片/视频/文档/音频/压缩包拆开看，可只清 30 天前的某一类。</p><a class="btn" href="/media">打开媒体分类</a></div>`)
 	b.WriteString(`<div class="card" style="border-color:#33c17955"><h2>懒人清理</h2><p class="muted">不想挑？一个按钮跑一轮最安全的清理，全部可撤销。</p><a class="btn" style="background:#1f6f4a;border-color:#33c179" href="/lazy">打开懒人清理</a></div>`)
 	b.WriteString(`<div class="card"><h2>一键方案</h2>` + planCardHTML(cfg, st) + `</div>`)
+	b.WriteString(winapp2CardHTML(cfg))
 
 	// 按应用（前 6）
 	groups := appGroups(cfg, st)

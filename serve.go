@@ -953,6 +953,32 @@ func newHTTPHandler(cfg Config, st *Store) http.Handler {
 		case "/clean":
 			// ?cat=<分类键> 只看某一类：报告里的分类行点过来就落在这里。
 			_, _ = w.Write([]byte(cleanPage(cfg, st, r.URL.Query().Get("cat"))))
+		case "/winapp2/apply":
+			// 社区规则那一组：只收 POST，且要重新扫一遍再动文件——
+			// 页面上的候选可能已经过期，也不能让表单参数直接决定动哪些路径。
+			if r.Method != http.MethodPost {
+				http.Redirect(w, r, "/clean", http.StatusSeeOther)
+				return
+			}
+			_ = r.ParseForm()
+			res, applyErr := winapp2Apply(cfg, r.Form.Get("name"))
+			var body strings.Builder
+			if applyErr != nil {
+				body.WriteString(`<div class="warn">` + htmlEscape(applyErr.Error()) + `</div>`)
+			} else {
+				body.WriteString(fmt.Sprintf(`<div class="card"><h2>已隔离：%s</h2><p>%d 处路径、%s 移进隔离区，%d 天内可还原。</p>`,
+					htmlEscape(res.Name), res.Moved, human(res.Bytes), cfg.QuarantineDays))
+				if len(res.Refused) > 0 {
+					body.WriteString(`<p class="muted">下面这些没动：</p><ul class="muted">`)
+					for _, s := range res.Refused {
+						body.WriteString("<li>" + htmlEscape(s) + "</li>")
+					}
+					body.WriteString(`</ul>`)
+				}
+				body.WriteString(`</div>`)
+			}
+			body.WriteString(`<p><a class="btn" href="/clean">回清理中心</a> <a class="btn" href="/detail#quarantine">看隔离区</a></p>`)
+			_, _ = w.Write([]byte(pageShell("社区规则清理", body.String())))
 		case "/media":
 			if r.URL.Query().Get("refresh") == "1" {
 				mediaInvalidate()

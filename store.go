@@ -34,6 +34,9 @@ type Config struct {
 	NotifyMinMB     int         `json:"notify_min_delta_mb"`
 	LazyAuto        string      `json:"lazy_auto"`      // off | daily | weekly
 	LazyAutoHour    int         `json:"lazy_auto_hour"` // 0-23
+	// Winapp2Path 是社区规则文件的位置。留空表示 <数据目录>\winapp2.ini。
+	// 它只提供「候选」，真正能不能动由 guardPath 判，执行走隔离区。
+	Winapp2Path string `json:"winapp2_path"`
 }
 
 func defaultConfig() Config {
