@@ -114,8 +114,12 @@ func mftCacheUsableCrossProc(cache *scanCache, anchorClean bool) *Scan {
 	return cache.Mft
 }
 
-// usnCacheStillClean 拿卷上的 USN 日志，验证「缓存写下之后到现在没有任何新记录」。
+// usnCacheStillClean 拿卷上的 USN 日志，验证「缓存写下之后到现在没有改动」。
 // 这是跨进程复用的唯一证据来源；任何一步读不到都算不确定，返回 false + 原因。
+//
+// t7 之后这里有两层：坐标层面的结构性判据（usnAnchorVerdict，t5 的口径一条没松），
+// 以及「多出来的记录里有没有改动」（usnAnchorClean）。第二层只在第一层放行后才跑，
+// 因为第一层不过的时候，读那些记录也是白读。
 func usnCacheStillClean(cache *scanCache, root string) (bool, string) {
 	letter, ok := volumeLetter(root)
 	if !ok {
@@ -126,14 +130,22 @@ func usnCacheStillClean(cache *scanCache, root string) (bool, string) {
 		// 没有管理员权限 / 日志没开 / 调用失败：都等于"不知道"，不许猜。
 		return false, err.Error()
 	}
-	return anchorStillClean(cache.Usn, cur)
+	var d deltaResult
+	if okV, _ := usnAnchorVerdict(cache.Usn, cur); okV && cur.Next > cache.Usn.Next {
+		n, mod, derr := usnDeltaReader(letter, cache.Usn.Next, cur.Next, cache.Usn.JournalID)
+		d = deltaResult{examined: true, records: n, modifying: mod, err: derr}
+	}
+	return usnAnchorClean(cache.Usn, cur, d)
 }
 
-// trustworthyAnchor 判断「这次扫描窗口里没有任何写入」，成立才返回可落盘的锚点。
+// trustworthyAnchor 判断「这次扫描窗口里没有任何改动」，成立才返回可落盘的锚点。
 //
 // 不成立就返回零值：那份快照照样能用（它是一次真实的 MFT 读数），
 // 但跨进程没有任何人能证明它到现在还有效，所以下次只能重扫。
-// 读不到坐标、读失败、前后两次对不上——全部算「不成立」，不许猜。
+// 读不到坐标、读不到记录、窗口里冒出一条改动类记录——全部算「不成立」，不许猜。
+//
+// t7 的放宽只体现在这里：以前要求窗口内**零条记录**，现在要求**零条改动类记录**。
+// 纯粹的 CLOSE 不改变任何数字，所以不再一票否决。
 func trustworthyAnchor(letter string, before usnAnchor, beforeErr error) usnAnchor {
 	if beforeErr != nil {
 		return usnAnchor{}
@@ -142,9 +154,13 @@ func trustworthyAnchor(letter string, before usnAnchor, beforeErr error) usnAnch
 	if err != nil {
 		return usnAnchor{}
 	}
-	clean, _ := anchorStillClean(before, after)
-	if !clean {
-		// 扫描期间有写入：这份快照可能是「中间某个瞬间」的样子。
+	var d deltaResult
+	if okV, _ := usnAnchorVerdict(before, after); okV && after.Next > before.Next {
+		n, mod, derr := usnDeltaReader(letter, before.Next, after.Next, before.JournalID)
+		d = deltaResult{examined: true, records: n, modifying: mod, err: derr}
+	}
+	if clean, _ := usnAnchorClean(before, after, d); !clean {
+		// 扫描期间有改动：这份快照可能是「中间某个瞬间」的样子。
 		// 拿它当零变更的基准，那几秒里的改动会被永久漏掉。
 		return usnAnchor{}
 	}

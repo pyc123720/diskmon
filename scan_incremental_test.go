@@ -103,6 +103,16 @@ func stubAnchorReader(t *testing.T, a usnAnchor, err error) {
 	t.Cleanup(func() { usnAnchorReader = old })
 }
 
+// stubDeltaReader 把「读 [from,to) 那段 USN 记录」换成固定答案：同样不碰真卷。
+func stubDeltaReader(t *testing.T, records int, modifying uint32, err error) {
+	t.Helper()
+	old := usnDeltaReader
+	usnDeltaReader = func(string, int64, int64, uint64) (int, uint32, error) {
+		return records, modifying, err
+	}
+	t.Cleanup(func() { usnDeltaReader = old })
+}
+
 // MFT 成功后必须留下缓存——这是「管理员第二次扫描不再重读整张 $MFT」的前提。
 func TestMftScanWritesCache(t *testing.T) {
 	cfg := Config{DataDir: t.TempDir(), Root: `C:\`}
@@ -242,10 +252,25 @@ func TestMftCacheCrossProcessReuse(t *testing.T) {
 		t.Fatal("跨进程：锚点一致且零事件时应复用整卷快照")
 	}
 
-	// 锚点之后又写了一条 → 必须重扫。
-	stubAnchorReader(t, usnAnchor{JournalID: 0x5150, First: 100, Next: 901}, nil)
+	// 锚点之后多了记录，但全是 CLOSE——CLOSE 不改任何数字，这是 t7 放宽的那一步。
+	stubAnchorReader(t, usnAnchor{JournalID: 0x5150, First: 100, Next: 905}, nil)
+	stubDeltaReader(t, 5, 0, nil)
+	if sc := cachedMftScan(prev, `C:\`, false, nil, false, now); sc == nil || sc.Files != 10 {
+		t.Fatal("跨进程：锚点之后只有无改动记录（CLOSE）时应复用")
+	}
+
+	// 锚点之后有一条写记录 → 必须重扫。这是放宽后的安全底线。
+	stubAnchorReader(t, usnAnchor{JournalID: 0x5150, First: 100, Next: 905}, nil)
+	stubDeltaReader(t, 5, 0x00000002, nil)
 	if sc := cachedMftScan(prev, `C:\`, false, nil, false, now); sc != nil {
-		t.Fatal("跨进程：锚点之后有新记录时不应复用")
+		t.Fatal("跨进程：锚点之后有改动类记录时不应复用")
+	}
+
+	// 需要读记录却读不到（比如权限不够）→ 不知道，必须重扫。
+	stubAnchorReader(t, usnAnchor{JournalID: 0x5150, First: 100, Next: 905}, nil)
+	stubDeltaReader(t, 0, 0, fmt.Errorf("读 USN 记录失败"))
+	if sc := cachedMftScan(prev, `C:\`, false, nil, false, now); sc != nil {
+		t.Fatal("跨进程：读不到 USN 记录时必须重扫")
 	}
 
 	// 读不到 USN（没权限 / 日志没开）→ 不知道，必须重扫。
