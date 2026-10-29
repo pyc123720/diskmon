@@ -316,12 +316,23 @@ func main() {
 		// 否则所有差异都会被默认记到 MFT 头上。
 		letter := "C"
 		if len(os.Args) > 2 {
-			letter = os.Args[2]
-			for len(letter) > 0 && (letter[len(letter)-1] == ':' || letter[len(letter)-1] == '\\') {
-				letter = letter[:len(letter)-1]
+			raw := os.Args[2]
+			t, ok := walkCountLetter(raw)
+			if !ok {
+				// 这里以前把入参原样当盘符，reportWalkCount 再拼成 "<入参>:\"：
+				// 传一个路径进去会去遍历一个不存在的根，报出 0 目录 0 文件，
+				// 还打印「本次遍历没有漏，可以直接当参照物用」。一个给 MFT 对账
+				// 提供参照物的诊断工具，宁可报错，也不能给出「可信」的错误结论。
+				fmt.Printf("用法：diskmon-go walk-count [盘符]　例如 walk-count C 或 walk-count C:\n")
+				fmt.Printf("  收到的是 %q —— 这个子命令只统计整个卷，不接受路径。\n", raw)
+				fmt.Printf("  要看某个目录的遍历数，用 inspect 或 dryrun。\n")
+				os.Exit(2)
 			}
+			letter = t
 		}
-		reportWalkCount(letter)
+		if !reportWalkCount(letter) {
+			os.Exit(3)
+		}
 	case "plans":
 		for _, pl := range allPlans(getConfig(), st) {
 			fmt.Printf("[%s] %d 个目录 · %s\n    %s\n", pl.Label, len(pl.Dirs), human(pl.Bytes), pl.Desc)

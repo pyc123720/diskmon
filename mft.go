@@ -1236,9 +1236,40 @@ func walkStats(root string) (files int, dirs int, total uint64, elapsed time.Dur
 // 存在的理由很具体：MFT 和目录遍历对不上时，我此前每次都默认是 MFT 少了。
 // 可遍历自己也会静默丢东西——不可读的目录整棵 SkipDir、junction 根本不数。
 // 不把这两个数摆出来，「谁错了」这个问题就没法问对。
-func reportWalkCount(letter string) {
+// walkCountLetter 把 walk-count 的入参规范成单个盘符字母。
+//
+// 这个子命令只统计整个卷。以前它把入参原样当盘符，于是
+// `walk-count C:\Users\me\dir` 会去遍历 `C:\Users\me\dir:\` 这种不存在的根，
+// 报出 0 目录 0 文件，还打「本次遍历没有漏，可以直接当参照物用」。
+// 一个诊断工具给出「可信」的错误结论，比直接报错更坏。
+func walkCountLetter(raw string) (string, bool) {
+	t := raw
+	for len(t) > 0 && (t[len(t)-1] == ':' || t[len(t)-1] == '\\') {
+		t = t[:len(t)-1]
+	}
+	if len(t) != 1 {
+		return "", false
+	}
+	c := t[0]
+	if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+		return strings.ToUpper(t), true
+	}
+	return "", false
+}
+
+// reportWalkCount 返回是否真的测到了东西。
+//
+// 返回 false 的场合只有一个：那个根根本不存在或读不了。这时绝不能照常打印
+// 「都是 0——本次遍历没有漏，可以直接当参照物用」——什么都没遍历到，
+// 却给出「可信」的结论，会让后面所有 MFT 对账的差异归因都指向错误方向。
+func reportWalkCount(letter string) bool {
 	root := letter + `:\`
 	fmt.Printf("纯目录遍历计数：%s（不需要管理员权限）\n\n", root)
+	if _, err := os.Stat(root); err != nil {
+		fmt.Printf("  这个根不存在或不可读：%v\n", err)
+		fmt.Println("  ——这次什么都没测到，下面的数字不作数，也不要拿去当参照物。")
+		return false
+	}
 	r := walkStatsFull(root)
 	fmt.Printf("  目录          : %d\n", r.dirs)
 	fmt.Printf("  文件          : %d\n", r.files)
@@ -1255,6 +1286,7 @@ func reportWalkCount(letter string) {
 		fmt.Println("  ⚠ 所以这个目录数只是**下限**。拿它去对账 MFT 之前，先减掉 junction，")
 		fmt.Println("    再想清楚那 N 个不可读目录的子树到底有多大——否则差异会被全算到 MFT 头上。")
 	}
+	return true
 }
 
 // reportMftPathDiff 把「MFT 认为存在的目录」和「目录遍历看到的目录」直接做差，
