@@ -153,13 +153,13 @@ func usnCacheStillClean(cache *scanCache, root string) (bool, string) {
 //
 // t7 的放宽只体现在这里：以前要求窗口内**零条记录**，现在要求**零条改动类记录**。
 // 纯粹的 CLOSE 不改变任何数字，所以不再一票否决。
-func trustworthyAnchor(letter string, before usnAnchor, beforeErr error) usnAnchor {
+func trustworthyAnchor(letter string, before usnAnchor, beforeErr error) (usnAnchor, string) {
 	if beforeErr != nil {
-		return usnAnchor{}
+		return usnAnchor{}, "扫描前取不到日志坐标：" + beforeErr.Error()
 	}
 	after, err := usnAnchorReader(letter)
 	if err != nil {
-		return usnAnchor{}
+		return usnAnchor{}, "扫描结束后取不到日志坐标：" + err.Error()
 	}
 	var d deltaResult
 	readRecords := false
@@ -172,16 +172,16 @@ func trustworthyAnchor(letter string, before usnAnchor, beforeErr error) usnAnch
 		// t14：读了记录就要复查一次坐标（原因见 recheckReadWindow）。
 		// 没读记录时（after.Next == before.Next）不进这里，零改动路径不多付 syscall。
 		post, perr := usnAnchorReader(letter)
-		if okRe, _ := recheckReadWindow(before, post, perr); !okRe {
-			return usnAnchor{}
+		if okRe, whyRe := recheckReadWindow(before, post, perr); !okRe {
+			return usnAnchor{}, "读完记录后复查不通过：" + whyRe
 		}
 	}
-	if clean, _ := usnAnchorClean(before, after, d); !clean {
+	if clean, whyC := usnAnchorClean(before, after, d); !clean {
 		// 扫描期间有改动：这份快照可能是「中间某个瞬间」的样子。
 		// 拿它当零变更的基准，那几秒里的改动会被永久漏掉。
-		return usnAnchor{}
+		return usnAnchor{}, "扫描窗口内不干净：" + whyC
 	}
-	return after
+	return after, ""
 }
 
 // cachedMftScan 返回上次 MFT 整卷扫描的结果（可以直接当本次结果用），nil 表示这次得重读。
@@ -530,7 +530,13 @@ func ScanRootCached(cfg Config, forceFull bool) (*Scan, string) {
 			// 就能直接复用这份结果，不必再读 110 万条记录。
 			// 被取消的那一次数据是残的——残的写进去比没有更坏，它会被当成完整结果。
 			if !scanCancelled() {
-				saveMftScanCache(cfg, sc, trustworthyAnchor(letter, before, beforeErr))
+				anc, why := trustworthyAnchor(letter, before, beforeErr)
+				if why != "" {
+					// 锚点没落盘，下一次扫描就还得全读 MFT。这条日志是唯一
+					// 能解释"为什么快不起来"的地方——判据拒绝了你，得说清是哪一条。
+					logf("mft: 这次不落盘锚点，下次仍会全读 MFT —— %s", why)
+				}
+				saveMftScanCache(cfg, sc, anc)
 				clearDirtyBefore(scanStart)
 			}
 			return sc, "mft"

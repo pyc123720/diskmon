@@ -171,7 +171,8 @@ func TestUsnCacheStillCleanFastPathNoExtraSyscall(t *testing.T) {
 	}
 }
 
-// trustsAnchor 这一侧（决定能不能落盘锚点）同样要复查：截断时只能返回零值。
+// trustsAnchor 这一侧（决定能不能落盘锚点）同样要复查：截断时只能返回零值，
+// 并且必须说清是哪一条不过——拒绝理由被丢掉的话，日志里就什么都看不到。
 func TestTrustworthyAnchorRechecksAfterReading(t *testing.T) {
 	before := usnAnchor{JournalID: 0x5150, First: 100, Next: 900}
 	after := usnAnchor{JournalID: 0x5150, First: 100, Next: 950}
@@ -181,8 +182,11 @@ func TestTrustworthyAnchorRechecksAfterReading(t *testing.T) {
 	usnDeltaReader = func(string, int64, int64, uint64) (int, uint32, error) { return 1, 0, nil }
 	t.Cleanup(func() { usnDeltaReader = oldD })
 
-	got := trustworthyAnchor("C", before, nil)
+	got, why := trustworthyAnchor("C", before, nil)
 	if got.valid() {
 		t.Fatalf("读取期间被截断时不许落盘锚点，实际拿到 %+v", got)
+	}
+	if why == "" {
+		t.Fatal("拒绝时理由不能为空——这一层拒了却不说为什么，排查只能靠猜")
 	}
 }
