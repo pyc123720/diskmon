@@ -12,7 +12,9 @@ func mustDecode(b []byte) string { return decodeConsoleOutput(b) }
 
 // 本机真实抓到的 DISM 输出（非管理员，GBK/936 原始字节，逐字节照抄）。
 // 来源：2026-10-29 20:03 在本机执行
-//   cmd /c "C:\Windows\System32\Dism.exe /Online /Cleanup-Image /AnalyzeComponentStore"
+//
+//	cmd /c "C:\Windows\System32\Dism.exe /Online /Cleanup-Image /AnalyzeComponentStore"
+//
 // 退出码非 0，输出即为下面这 69 个字节。
 // 注意：它是 GBK 不是 UTF-8——这正是 decodeConsoleOutput 存在的理由。
 var realDismNotElevated = []byte{
@@ -31,6 +33,7 @@ var realDismNotElevated = []byte{
 // 这份夹具的用途只有一个：钉住「字段顺序 + 等式校验」这条解析路径。
 //   - 各行的措辞按 DISM 中文版的实际用词写，冒号、缩进、百分比进度条都按真实格式；
 //   - 数字是测试填的，模拟微软文档里的那组例子（实际 8.86 GB = 6.27 + 2.58 + 0.01）。
+//
 // 它不是「某次真实运行的输出」，报告里我也这么说了。
 const dismChineseShape = `部署映像服务和管理工具
 版本: 10.0.19041.844
