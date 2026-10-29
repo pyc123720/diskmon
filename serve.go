@@ -902,7 +902,8 @@ func newHTTPHandler(cfg Config, st *Store) http.Handler {
 			http.Redirect(w, r, "/settings?notice="+urlQuery("已恢复默认设置"), http.StatusSeeOther)
 			return
 		case "/clean":
-			_, _ = w.Write([]byte(cleanPage(cfg, st)))
+			// ?cat=<分类键> 只看某一类：报告里的分类行点过来就落在这里。
+			_, _ = w.Write([]byte(cleanPage(cfg, st, r.URL.Query().Get("cat"))))
 		case "/media":
 			if r.URL.Query().Get("refresh") == "1" {
 				mediaInvalidate()

@@ -113,7 +113,7 @@ func appShell(title, active, body string) string {
 <title>` + htmlEscape(title) + ` · diskmon</title>
 <link rel="icon" href="/favicon.ico">
 <style>` + css + navCSS + themeCSS() + `</style></head><body><div class="wrap">` + navBar(active) + dataDirBanner() + muteBanner() + body + uiJS + `</div></body></html>`
-	html = strings.Replace(html, "</body></html>", loadOverlay + "</body></html>", 1)
+	html = strings.Replace(html, "</body></html>", loadOverlay+"</body></html>", 1)
 	return translateHTML(html)
 }
 
@@ -187,9 +187,9 @@ func overviewPage(cfg Config, st *Store) string {
 	// 右：今日建议（结论随当天状态变化，依据行说明「为什么是今天」）
 	if len(board.Items) == 0 { // 兜底：绝不因为建议为空把整页打崩
 		board.Items = append(board.Items, todayItem{Kind: "quiet",
-			Title:  bi("今天没有需要处理的事", "Nothing to do today"),
-			Why:    bi("没有异常增长，也没有待处理的隔离项。", "No unusual growth and nothing waiting in quarantine."),
-			Href:   "/trend", Action: bi("看一眼趋势", "Check the trend")})
+			Title: bi("今天没有需要处理的事", "Nothing to do today"),
+			Why:   bi("没有异常增长，也没有待处理的隔离项。", "No unusual growth and nothing waiting in quarantine."),
+			Href:  "/trend", Action: bi("看一眼趋势", "Check the trend")})
 	}
 	head, rest := board.Items[0], board.Items[1:]
 	b.WriteString(`<div class="card"><h2>今日建议<span class="muted" style="float:right;font-weight:400;font-size:13px">` +
@@ -318,7 +318,14 @@ func overviewPage(cfg Config, st *Store) string {
 
 // ---------- 清理中心 ----------
 
-func cleanPage(cfg Config, st *Store) string {
+func cleanPage(cfg Config, st *Store, cat string) string {
+	// 不认识的分类键当没传——?cat=/随便写 不能把页面搞成空白。
+	if _, ok := cats[cat]; !ok {
+		cat = ""
+	}
+	if cat != "" {
+		return cleanPageForCat(cfg, st, cat)
+	}
 	var b strings.Builder
 	b.WriteString(`<h2 style="margin-top:0">清理中心</h2>`)
 	b.WriteString(`<p class="muted">所有清理动作都先进隔离区，7 天内可还原；永久删除只走 L2 规则。</p>`)
@@ -374,6 +381,82 @@ func cleanPage(cfg Config, st *Store) string {
 	b.WriteString(`</div>`)
 
 	return appShell("清理中心", "clean", b.String())
+}
+
+// cleanPageForCat 只显示一个分类：它有多大、占在哪、能不能清、该从哪儿进。
+//
+// 特意没做「点一下就删掉这一整类」。一个分类动辄几 GB、上千个目录，
+// 把这种体量的删除压缩成一个按钮，等于把误触放大成灾难；而且很多类本来就
+// 该走它自己的工具（DISM、powercfg、软件卸载）。所以这里只做「收敛到这一类 + 给对入口」。
+func cleanPageForCat(cfg Config, st *Store, cat string) string {
+	meta := cats[cat]
+	title := "清理中心 · " + meta.Label
+	var b strings.Builder
+
+	b.WriteString(`<h2 style="margin-top:0">` + htmlEscape(title) + `</h2>`)
+	b.WriteString(`<div class="muted" style="margin-bottom:12px">正在只看这一类。` +
+		`<a class="act" href="/clean">显示全部分类</a></div>`)
+
+	sc := st.GetScan()
+	if sc == nil || len(sc.Cats) == 0 {
+		b.WriteString(`<div class="card"><div class="muted">还没有扫描结果，先回总览跑一次扫描。</div>` +
+			`<div style="margin-top:8px"><a class="btn" href="/">回总览</a></div></div>`)
+		return appShell(title, "clean", b.String())
+	}
+
+	sum := sc.Cats[cat]
+	sh := sc.CatsShared[cat]
+	uniq := sum
+	if sh > 0 && sh < sum {
+		uniq = sum - sh
+	}
+
+	// 体积
+	b.WriteString(`<div class="card"><h2>体积</h2>`)
+	b.WriteString(fmt.Sprintf(`<div class="kpi"><div><span class="big">%s</span><span class="unit"> 这一类</span></div>`+
+		`<div class="muted">%s</div></div>`, human(sum), htmlEscape(tierText[meta.Tier])))
+	if sh > 0 {
+		b.WriteString(fmt.Sprintf(`<div class="muted">其中 %s 是与别处共享的硬链接（下限，只覆盖 ≥%d MB 的文件），实际占空间约 %s。</div>`,
+			human(sh), sc.HlProbeMB, human(uniq)))
+	}
+	b.WriteString(`<div class="muted">` + htmlEscape(meta.Hint) + `</div></div>`)
+
+	// 证据：占在哪
+	b.WriteString(`<div class="card"><h2>这一类里体积最大的路径</h2>`)
+	paths := topPathsForCat(sc, cat, 20)
+	if len(paths) == 0 {
+		b.WriteString(`<div class="muted">没有超过 64 MB 的路径记录——体积可能集中在卷根的大文件上` +
+			`（如 pagefile.sys / hiberfil.sys），也可能就是大量零散文件，这里看不出来。</div>`)
+	} else {
+		b.WriteString(`<table><tr><th>路径</th><th style="text-align:right;width:90px">体积</th></tr>`)
+		for _, p := range paths {
+			b.WriteString(fmt.Sprintf(`<tr><td class="path">%s</td><td class="r">%s</td></tr>`,
+				htmlEscape(p.Path), human(p.Bytes)))
+		}
+		b.WriteString(`</table>`)
+	}
+	b.WriteString(`</div>`)
+
+	// 怎么处理
+	b.WriteString(`<div class="card"><h2>怎么处理</h2>`)
+	switch meta.Tier {
+	case "clean":
+		b.WriteString(`<div class="muted">可再生，清掉会自动重建，不会丢数据。` +
+			`走懒人清理时全部先进隔离区，7 天内可还原。</div>`)
+		b.WriteString(`<div style="margin-top:10px"><a class="btn" style="background:#1f6f4a;border-color:#33c179" href="/lazy">打开懒人清理（可撤销）</a></div>`)
+	case "confirm":
+		b.WriteString(`<div class="muted">建议先确认：这一类可能含你还要用的内容，工具不会替你一键清掉。</div>`)
+		b.WriteString(`<div class="muted" style="margin-top:6px">按应用/目录逐个看，再决定要不要清。</div>`)
+		b.WriteString(`<div style="margin-top:10px"><a class="btn" href="/apps">按应用查看</a></div>`)
+	case "adjust":
+		b.WriteString(`<div class="warn">不要手删。这一类的正确做法是它自己的工具，不是删目录。</div>`)
+		b.WriteString(`<div class="muted" style="margin-top:6px">` + htmlEscape(meta.Hint) + `</div>`)
+	default:
+		b.WriteString(`<div class="muted">建议保留。这不是垃圾，是系统或程序的正常组成部分。</div>`)
+	}
+	b.WriteString(`</div>`)
+
+	return appShell(title, "clean", b.String())
 }
 
 func shortText(s string, n int) string {
@@ -636,7 +719,6 @@ func themeCSS() string {
 	}
 	return ""
 }
-
 
 // loadOverlay：点击链接/提交表单后，浏览器等待服务器响应期间的反馈
 const loadOverlay = `<div id="dshload" aria-hidden="true"><div class="lbar"><i></i></div><div class="ltext">正在处理…</div></div>

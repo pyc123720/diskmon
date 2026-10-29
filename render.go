@@ -632,6 +632,36 @@ func svgProjection(f Forecast, freeGB float64, cfg Config) string {
 	return b.String()
 }
 
+// catPath 是一个「体积最大的路径」条目。
+type catPath struct {
+	Path  string
+	Bytes uint64
+}
+
+// topPathsForCat 取某个分类里体积最大的若干路径。
+//
+// 注意：这可能是目录，也可能是单个大文件——sc.Deep 存的是路径前缀，
+// 深度 4 的前缀切在深层文件路径上就正好是文件名。所以调用方一律叫「路径」，
+// 不要叫「目录」，否则会像我第一版那样把 msedge.dll 标成目录。
+func topPathsForCat(sc *Scan, cat string, n int) []catPath {
+	if sc == nil || n <= 0 {
+		return nil
+	}
+	var out []catPath
+	for _, list := range [][]DirEntry{sc.Deep, sc.Dirs3} {
+		for _, e := range list {
+			if e.Cat == cat {
+				out = append(out, catPath{e.Path, e.Bytes})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Bytes > out[j].Bytes })
+	if len(out) > n {
+		out = out[:n]
+	}
+	return out
+}
+
 // catDetailHTML 是一个分类行展开后的内容：这一类里最大的几处目录、能不能清、怎么清。
 //
 // 报告是静态快照，清理动作走不了（真要删得在 serve 模式下点），
@@ -648,28 +678,12 @@ func catDetailHTML(cat string, sc *Scan, cfg Config) string {
 
 	b.WriteString(`<div class="catbox"><h4>这一类里体积最大的路径</h4>`)
 
-	// 深度 4 的目录列表覆盖 >=64MB 的；深度 3 的只是前 15 条，作补充。
-	type dr struct {
-		p string
-		n uint64
-	}
-	var dirs []dr
-	for _, list := range [][]DirEntry{sc.Deep, sc.Dirs3} {
-		for _, e := range list {
-			if e.Cat == cat {
-				dirs = append(dirs, dr{e.Path, e.Bytes})
-			}
-		}
-	}
-	sort.Slice(dirs, func(i, j int) bool { return dirs[i].n > dirs[j].n })
-	if len(dirs) > 8 {
-		dirs = dirs[:8]
-	}
+	dirs := topPathsForCat(sc, cat, 8)
 	if len(dirs) > 0 {
 		b.WriteString(`<table>`)
 		for _, d := range dirs {
 			b.WriteString(fmt.Sprintf(`<tr><td class="path">%s</td><td class="r">%s</td></tr>`,
-				html.EscapeString(d.p), human(d.n)))
+				html.EscapeString(d.Path), human(d.Bytes)))
 		}
 		b.WriteString(`</table>`)
 	} else {
@@ -696,9 +710,9 @@ func catDetailHTML(cat string, sc *Scan, cfg Config) string {
 	}
 	b.WriteString(`</div>`)
 	b.WriteString(fmt.Sprintf(`<div class="muted" style="margin-top:8px">清理动作要在页面里点：`+
-		`<a href="http://127.0.0.1:%d/clean" target="_blank">打开清理中心</a>`+
+		`<a href="http://127.0.0.1:%d/clean?cat=%s" target="_blank">只看这一类的清理页</a>`+
 		`　（需先运行 <code>diskmon-go serve</code>；这份报告是静态快照，本身不会删任何文件）</div>`,
-		cfg.Port))
+		cfg.Port, urlQuery(cat)))
 	b.WriteString(`</div>`)
 	return b.String()
 }
