@@ -1,10 +1,15 @@
-﻿# Build diskmon on Windows.
+# Build diskmon on Windows.
 #   ./build.ps1                 build app -> dist/diskmon-go.exe
 #   ./build.ps1 -Installer      also build dist/diskmon-setup.exe (prepares payload)
 #   ./build.ps1 -SkipTests      skip go test
+#   ./build.ps1 -Version 2.6.5  stamp the version the binary reports
+#
+# 版本号必须注入，否则 exe 会一直自称 main.go 里那个占位值——用户贴 diag 报 bug 时，
+# 我们分不清他跑的是哪个构建。默认 "dev"，正式发布时显式传 -Version。
 param(
     [switch]$Installer,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [string]$Version = 'dev'
 )
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
@@ -23,7 +28,7 @@ if (-not $SkipTests) {
 
 New-Item -ItemType Directory -Force dist | Out-Null
 Write-Host '== build app =='
-go build -trimpath -ldflags '-H windowsgui -s -w' -o dist/diskmon-go.exe .
+go build -trimpath -ldflags "-H windowsgui -s -w -X main.version=$Version" -o dist/diskmon-go.exe .
 if ($LASTEXITCODE -ne 0) { throw 'build failed' }
 
 if ($Installer) {

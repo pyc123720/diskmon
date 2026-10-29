@@ -10,7 +10,8 @@ import (
 	"unsafe"
 )
 
-var version = "0.5.0"
+// version 由 build.ps1 用 -ldflags -X main.version=<tag> 注入；直接 go build 时是 dev。
+var version = "dev"
 
 var (
 	pGetProcessMemoryInfo = syscall.NewLazyDLL("psapi.dll").NewProc("GetProcessMemoryInfo")

@@ -3,6 +3,46 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.6.5
+
+The release where the community rule parser finally does something, and where three separate
+ways of reporting success while doing nothing were found and closed.
+
+- **winapp2.ini rules now propose candidates.** The parser had been sitting unused since it was
+  written, and the reason was written down: community rulesets contain entries that delete system
+  directories. That reason still holds, so the connection runs through three gates instead of one.
+  The rule layer accepts only resolved, non-out-of-bounds paths; `guardPath` still decides, and
+  only the `clean` tier becomes a candidate; the button moves files into quarantine. Anything
+  rejected at any gate is listed with its reason, so an installed ruleset that does nothing looks
+  like an explanation rather than a bug.
+- **Rules that declare `ExcludeKey` are not adopted at all.** Exclusion means "leave these alone",
+  and the parser counted those lines without anything applying them — a rule saying "delete *.log
+  except important.log" would have moved `important.log` too. Recoverable through quarantine, but
+  the ruleset stated an intent and it was being ignored. Whole sections with an exclusion are
+  skipped until real exclusion support lands.
+- **A no-op is no longer reported as success.** `winapp2Apply` found a section, found zero
+  actionable paths, looped zero times and returned success — the page would have rendered "0 paths,
+  0 B moved" as if it were done. It now returns the first rejection reason instead.
+- **Rule paths accept `%VAR%`.** The rule editor was the only path entry point still using
+  `os.ExpandEnv`, which does not expand the Windows `%LOCALAPPDATA%` form, so a correct path was
+  reported as unreadable. Refusals are also split into three messages now — missing, unreadable
+  (permission or lock), and "this is a file" — because they need different user actions.
+- **"A move is not an erase" is stated where users read it.** SECURITY.md had said it correctly
+  since the quarantine existed, which is a document nobody opens after clicking a button labelled
+  "quarantine". The same statement now also appears in both READMEs and on the quarantine card,
+  citing Gutmann (USENIX Security '96) and Wei et al. (FAST '11).
+- **The version the binary reports is now injected.** `main.version` was hardcoded to `0.5.0` and
+  `build.ps1` passed no `-ldflags -X`, so every published build claimed to be 0.5.0 in `diag`,
+  `status` and the MCP `serverInfo`. A bug report quoting 0.5.0 could not be tied to any release.
+  `build.ps1 -Version <tag>` stamps it now; a plain `go build` reports `dev`.
+- **Test infrastructure.** `TestMain` probes whether `%TEMP%` allows creating a *directory* (not
+  merely writing a file — on this machine those answers differ) and falls back next to the test
+  binary when it does not; the suite had been silently depending on `run-tests.ps1` setting `TMP`.
+  `tools/stress-tests.ps1` runs the suite in shuffled order and with `-test.count` to catch
+  cross-test state. The GBK assertions now skip when the system code page is not 936, because they
+  were asserting something about the machine rather than about the code — which is how they passed
+  locally and failed on the English CI image the first time they were ever pushed.
+
 ## 2.6.4
 
 Two things that had been reporting success while doing nothing: a save button that answered
