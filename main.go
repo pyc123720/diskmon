@@ -139,6 +139,11 @@ func main() {
 		}
 		runScan(cfg, st)
 		st.Save()
+	case "winsxs", "dism-analyze":
+		// 只读、按需：DISM 的组件库分析。约 1–2 分钟、要管理员、明显占 CPU，
+		// 所以它是一条独立子命令，**不接进扫描路径**。
+		fmt.Println("正在分析组件库（DISM，约 1–2 分钟，需要管理员权限）…")
+		fmt.Print(plainComponentStore(analyzeComponentStore()))
 	case "report":
 		fmt.Println("报告：", writeReport(cfg, st))
 	case "report-open":
