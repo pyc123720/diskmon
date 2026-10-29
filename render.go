@@ -347,6 +347,12 @@ func renderPage(cfg Config, st *Store) string {
 
 	// 隔离区
 	b.WriteString("<div class=\"card\" id=\"quarantine\" style=\"margin-top:14px\"><h2>隔离区（可还原，不立即删除）</h2>")
+	// 这句话必须一直挂在标题底下，不能只在「永久删除」按钮旁边：
+	// 「隔离区」这个名字本身容易被读成「安全处理」，而它是逻辑删除——文件只是挪走了。
+	// 介质上的原内容仍可能被恢复，覆盖写对现代介质也不可靠（Gutmann, USENIX Sec '96；
+	// Wei et al., FAST '11），所以不能让人以为删完就没了。
+	b.WriteString("<div class=\"muted\">隔离区是<b>逻辑删除</b>：文件从这里挪走，到期只是从文件系统移除，<b>不是安全擦除</b>。" +
+		"介质上的原内容仍可能被恢复。真要不可恢复，请用专门的擦除工具。</div>")
 	q := openQuarantine(cfg)
 	var active []QEntry
 	var qbytes uint64

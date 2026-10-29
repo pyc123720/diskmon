@@ -18,6 +18,12 @@ needs three confirmations.
 
 > **Note on data safety** — this tool moves files into a quarantine folder, and its L2 "auto-clean"
 > rules can permanently delete files. Read [SECURITY.md](SECURITY.md) before enabling rules.
+>
+> **A move is not an erase.** Quarantine is a *logical* delete: the file leaves its old path, sits in
+> the quarantine folder, and 7 days later is unlinked from the file system — nothing overwrites its
+> bytes. On both magnetic and solid-state media, overwriting does not reliably destroy what was there
+> (Gutmann, USENIX Security '96; Wei et al., FAST '11), so read "deleted" here as "no longer
+> reachable", never as "unrecoverable". If you need data to be *gone*, this is not that tool.
 
 [中文说明](README.zh-CN.md)
 
