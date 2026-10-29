@@ -3,6 +3,33 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.6.2
+
+Category breakdown became navigable, in three steps.
+
+- **Report: category rows expand in place.** Clicking one shows the largest paths inside that
+  category, what its tier means, and the one entry point that is actually correct for it. The
+  report is a static snapshot and cannot delete anything, so the panel gives evidence, judgement
+  and a link into the server rather than pretending to be a one-click delete.
+- **`/clean?cat=<category>` scopes the cleanup center to one category.** Same content, live, with
+  the right action per tier: `clean` → lazy clean, `confirm` → per-app view, `adjust` → "do not
+  delete by hand" plus the tool that actually owns it (DISM, powercfg, the uninstaller), `keep` →
+  no button at all. Unknown or empty `cat` falls back to the full page instead of rendering blank.
+- **Category chips on both pages.** Before this the filtered view was reachable only by following a
+  link out of the report: you could go back to everything, but not sideways to a neighbour, and the
+  cleanup center never mentioned a per-category view existed. Sorted by size, current one
+  highlighted, `全部` shown only while filtering.
+- **The overview now explains why `已用` and the scan total differ.** Two numbers sitting side by
+  side get subtracted by the reader, and a ~9 GB gap with no explanation reads as broken arithmetic
+  — in a cleanup tool that is exactly the wrong impression. It states the gap, attributes it
+  (NTFS metafiles + directories the scan cannot enumerate), and says outright that it is expected.
+
+Two wording bugs found by reading rendered output, not by tests: `sc.Deep` holds path *prefixes*, and
+a depth-4 prefix of a deep file path **is** the file — labelling that list "最大的目录" filed
+`msedge.dll` under a heading claiming it was a directory. And a category with no large path was
+described as "大量零散文件凑出来的", which is false for `pagefile.sys`: one 11 GB file whose depth
+prefix never reaches the threshold. Both now say what the data actually supports.
+
 ## 2.6.1
 
 - **`scan` now uses the MFT engine by default**, with `scan --walk` as the escape hatch.
