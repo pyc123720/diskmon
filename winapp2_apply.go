@@ -121,6 +121,14 @@ func winapp2Scan(cfg Config) ([]Winapp2Group, []string) {
 			continue
 		}
 		g := Winapp2Group{Name: e.Name}
+		// ExcludeKey 是「这些别动」。我们还不支持排除语义，那就不能只照 FileKey 动手——
+		// 否则规则特意留下的文件会被一起挪走。整段不采纳，比猜一个近似行为安全。
+		if e.Excludes > 0 {
+			g.Skipped = append(g.Skipped, fmt.Sprintf(
+				"这一段声明了 %d 条 ExcludeKey（排除项），我们还不支持排除，所以整段不采纳", e.Excludes))
+			groups = append(groups, g)
+			continue
+		}
 		seen := make(map[string]bool, len(e.Files))
 		for _, fk := range e.Files {
 			if !fk.Resolved {
@@ -190,6 +198,15 @@ func winapp2Apply(cfg Config, name string) (Winapp2ApplyResult, error) {
 	}
 	if target == nil {
 		return out, fmt.Errorf("没有这段规则，或者它没有任何可处理的路径：%s", name)
+	}
+	// 「一条路都没通过」不是成功。移了 0 个文件却回一句「已完成」，
+	// 比明确说「这一组动不了，原因在此」更糟——用户会以为清理过了。
+	if len(target.Paths) == 0 {
+		reason := "没有可处理的路径"
+		if len(target.Skipped) > 0 {
+			reason = target.Skipped[0]
+		}
+		return out, fmt.Errorf("「%s」这一组动不了：%s", name, reason)
 	}
 	q := openQuarantine(cfg)
 	for _, p := range target.Paths {

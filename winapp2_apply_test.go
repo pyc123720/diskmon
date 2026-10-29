@@ -165,3 +165,48 @@ func TestWinapp2ScanWithoutFileIsQuiet(t *testing.T) {
 		t.Fatalf("卡片应当提示规则文件缺失，实际：%s", html)
 	}
 }
+
+// ExcludeKey 是「这些别动」。不支持排除就不能照 FileKey 动手，
+// 否则规则特意留下的文件会被一起挪走——整段不采纳，并说明原因。
+func TestWinapp2SkipsEntriesWithExcludes(t *testing.T) {
+	cfg := Config{DataDir: t.TempDir(), QuarantineDays: 7, QuarantineMaxGB: 20}
+	cleanRoot := winapp2TestCleanDir(t)
+	if err := os.WriteFile(filepath.Join(cleanRoot, "keep-me.tmp"), []byte("1234"), 0o644); err != nil {
+		t.Fatalf("写测试文件失败：%v", err)
+	}
+
+	ini := "[带排除的缓存]\n" +
+		"FileKey1=" + cleanRoot + "|*.tmp|\n" +
+		"ExcludeKey1=FILE|" + cleanRoot + "|keep-me.tmp|\n"
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "winapp2.ini"), []byte(ini), 0o644); err != nil {
+		t.Fatalf("写规则文件失败：%v", err)
+	}
+
+	groups, _ := winapp2Scan(cfg)
+	var g Winapp2Group
+	found := false
+	for _, cand := range groups {
+		if cand.Name == "带排除的缓存" {
+			g, found = cand, true
+		}
+	}
+	if !found {
+		t.Fatalf("这一段应当被列出来说明原因，而不是消失")
+	}
+	if len(g.Paths) != 0 {
+		t.Fatalf("声明了 ExcludeKey 的段落不能进候选，实际：%v", g.Paths)
+	}
+	if len(g.Skipped) == 0 || !strings.Contains(g.Skipped[0], "ExcludeKey") {
+		t.Fatalf("拒绝原因里要写明 ExcludeKey，实际：%v", g.Skipped)
+	}
+
+	// 整段不采纳，所以那个本该被排除的文件必须还在原地
+	if _, err := os.Stat(filepath.Join(cleanRoot, "keep-me.tmp")); err != nil {
+		t.Fatalf("规则想留下的文件被动了：%v", err)
+	}
+
+	// 点不下去：即使直接调 apply 也要失败，不能留下绕过路径
+	if _, err := winapp2Apply(cfg, "带排除的缓存"); err == nil {
+		t.Fatalf("没有可处理路径的规则不该能执行")
+	}
+}
