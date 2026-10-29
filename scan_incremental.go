@@ -248,6 +248,133 @@ func cloneCounts(m map[string]uint64) map[string]uint64 {
 	return out
 }
 
+// ---------- B2 Phase 1：把 USN 增量应用到快照上 ----------
+
+// deltaApplyLimit 是一次增量能处理的记录上限。沿用读日志那个数：
+// 再多的话，「读日志 + 逐条判定」的代价已经超过重扫一遍。
+const deltaApplyLimit = 20000
+
+// applyUsnDeltas 把一批记录应用到基线快照上，返回「现在」的一份。
+//
+// 第二个返回值非空 = **必须回落全扫**，并且说明为什么。调用方拿到非空值时
+// 不许用返回的快照——宁可慢，也不许给一个偏小的数字：少算的字节意味着
+// 用户以为自己还有空间。
+//
+// 三条纪律：
+//  1. 任一记录判不准 → 整批回落，不做「先应用能应用的那部分」。半份增量比没有更坏。
+//  2. 应用完必须过不变量校验（Unique+Shared==Total、sum(Cats)==Total）；不满足也回落——
+//     那说明基线本身已经坏了，不是增量能修的。
+//  3. 不改基线：进来的是 base，出去的是 clone。
+//
+// 注意：**这里不做名字→路径的还原，也不做 os.Stat**。记录里的 Path/OldSize/NewSize
+// 都必须由调用方填好。原因见 usnDeltaRec 的注释：快照目前没有逐文件表，生产路径上
+// OldSize 无处可取，所以写/删这两类在真实扫描里仍会回落，只有「新增」能落地。
+// 补齐那块索引是 Phase 2 的事，不在本单夹带。
+func applyUsnDeltas(base *Scan, recs []usnDeltaRec, root, dataDir string) (*Scan, string) {
+	if base == nil {
+		return nil, "没有基线快照，无法应用增量"
+	}
+	if len(recs) > deltaApplyLimit {
+		return nil, fmt.Sprintf("记录太多（%d > %d），读日志+判定的代价超过重扫", len(recs), deltaApplyLimit)
+	}
+	// 先查基线自己：一份自相矛盾的快照上做增量，只会把错放大。
+	// 注意 Unique 我们后面会按 Total-Shared 重算，所以基线的 Unique 不一致也照样拒绝——
+	// 那说明这份缓存不是本版本写的，宁可重扫。
+	if why := checkScanInvariants(base); why != "" {
+		return nil, "基线快照本身不满足不变量，不敢在它上面加增量：" + why
+	}
+	cur := cloneScan(base)
+	if cur.Cats == nil {
+		cur.Cats = map[string]uint64{}
+	}
+	dataLow := strings.ToLower(strings.TrimSuffix(dataDir, `\`))
+
+	for _, r := range recs {
+		kind, why := classifyDeltaRec(r, root, dataLow)
+		switch kind {
+		case deltaSkip:
+			// CLOSE 这类不改变任何数字：跳过，不是失败。
+			continue
+		case deltaFallback:
+			return nil, why
+		case deltaCreate:
+			cur.Total += r.NewSize
+			cur.Files++
+			cur.Cats[catForPath(r.Path)] += r.NewSize
+		case deltaDelete:
+			// 快照里总量比这条文件还小：基线本身就说不通，别往下减。
+			if r.OldSize > cur.Total {
+				return nil, fmt.Sprintf("删除 %s 会让总量变负（基线 %d < 该文件 %d），基线不可信",
+					r.Path, cur.Total, r.OldSize)
+			}
+			cat := catForPath(r.Path)
+			if r.OldSize > cur.Cats[cat] {
+				return nil, fmt.Sprintf("删除 %s 会让分类 %s 变负，基线不可信", r.Path, cat)
+			}
+			cur.Total -= r.OldSize
+			cur.Cats[cat] -= r.OldSize
+			cur.Files--
+		case deltaWrite:
+			cat := catForPath(r.Path)
+			if r.NewSize >= r.OldSize {
+				grow := r.NewSize - r.OldSize
+				cur.Total += grow
+				cur.Cats[cat] += grow
+			} else {
+				shrink := r.OldSize - r.NewSize
+				if shrink > cur.Total || shrink > cur.Cats[cat] {
+					return nil, fmt.Sprintf("缩小 %s 会让总量/分类变负，基线不可信", r.Path)
+				}
+				cur.Total -= shrink
+				cur.Cats[cat] -= shrink
+			}
+		}
+	}
+	cur.Unique = uniqueBytes(cur.Total, cur.Shared)
+	if why := checkScanInvariants(cur); why != "" {
+		return nil, why
+	}
+	return cur, ""
+}
+
+// checkScanInvariants 是增量路径的闸门：把「这份快照还像不像一份真扫描结果」查一遍。
+// 两条都沿用既有口径：Unique+Shared==Total（硬链接三口径自洽）、sum(Cats)==Total（分类不漏账）。
+func checkScanInvariants(sc *Scan) string {
+	if sc.Unique+sc.Shared != sc.Total {
+		return fmt.Sprintf("不变量不满足：Unique(%d) + Shared(%d) != Total(%d)", sc.Unique, sc.Shared, sc.Total)
+	}
+	var sum uint64
+	for _, v := range sc.Cats {
+		sum += v
+	}
+	if sum != sc.Total {
+		return fmt.Sprintf("不变量不满足：分类合计(%d) != Total(%d)", sum, sc.Total)
+	}
+	if sc.Files < 0 {
+		return "不变量不满足：文件数为负"
+	}
+	return ""
+}
+
+// catForPath 给一个文件路径判分类，规则和扫描时保持一致：
+// 先按所在目录分类，再补上几个必须固定分类的系统大文件。
+func catForPath(path string) string {
+	dir := parentDir(path)
+	base := path
+	if i := strings.LastIndexByte(path, '\\'); i >= 0 && i+1 < len(path) {
+		base = path[i+1:]
+	}
+	switch strings.ToLower(base) {
+	case "hiberfil.sys", "swapfile.sys":
+		return "system_hiber"
+	case "pagefile.sys":
+		return "system_pagefile"
+	case "memory.dmp":
+		return "logs_dumps"
+	}
+	return classify(strings.ToLower(dir) + `\`)
+}
+
 // topChild 返回路径所属的顶层子树（结尾带分隔符），如 C:\Users\
 func topChild(root, p string) string {
 	r := strings.TrimRight(root, `\`) + `\`

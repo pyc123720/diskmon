@@ -415,6 +415,130 @@ func usnAnchorClean(prev, cur usnAnchor, d deltaResult) (bool, string) {
 	return true, ""
 }
 
+// ---------- B2 Phase 1：把 USN 增量应用到快照上 ----------
+//
+// 这一层的定位要跟 t7 那层分清：
+//   - t7（anchorStillClean / usnAnchorClean）回答的是「一份都没改吗」——没改就直接用缓存；
+//   - 这里回答的是「改了一些，但能不能**安全地把改动算进去**」——能就用增量，不能就回落全扫。
+// 两层并存，谁都不替代谁。
+
+// 应用增量时需要认的 reason 位。只列与「能不能算准」相关的那些。
+const (
+	reasonEaChange    = 0x00000400 // 扩展属性
+	reasonSecurity    = 0x00000800 // ACL / owner
+	reasonBasicInfo   = 0x00008000 // mtime / 基础属性
+	reasonHardLink    = 0x00010000 // 硬链接数
+	reasonCompression = 0x00020000 // 压缩
+	reasonEncryption  = 0x00040000 // 加密
+	reasonObjectID    = 0x00080000 // 对象 ID
+	reasonReparse     = 0x00100000 // 重解析点（junction/符号链接）
+	reasonStream      = 0x00200000 // 命名流
+	reasonIntegrity   = 0x00800000 // 完整性流（含稀疏化相关口径）
+)
+
+// usnDeltaRec 是一条「可能可以应用」的记录，把应用需要的**事实**全摊开：
+// 路径、原因位、是不是目录、快照里原来多大、现在多大。
+//
+// 名字→路径的还原，以及「快照里原来有多大」，都不在这里做：
+// 前者要 FRN→路径（Phase 2 的逐文件索引），后者要快照自带逐文件表（现在没有）。
+// 这么切开的好处是：应用逻辑本身可以离线对拍，不用真去读盘。
+type usnDeltaRec struct {
+	Path       string
+	Reason     uint32
+	IsDir      bool
+	InSnapshot bool   // 快照里有没有这个文件
+	OldSize    uint64 // 快照里记的大小（InSnapshot 为 true 时才有效）
+	NewSize    uint64 // 现在的大小
+	NewMTime   int64
+}
+
+// deltaKind 是一条记录的处理方式。
+type deltaKind int
+
+const (
+	deltaSkip     deltaKind = iota // 没改动（CLOSE 这类）：跳过，不算失败
+	deltaCreate                    // 新增文件
+	deltaDelete                    // 删除文件
+	deltaWrite                     // 大小变了
+	deltaFallback                  // 必须回落全扫
+)
+
+// classifyDeltaRec 逐条判定「能不能安全应用」。第二个返回值非空就是回落理由。
+//
+// 这里的每一条拒绝都对应一个真实会把数字算错的场景，注释写的是**为什么**，
+// 不是「保险起见」。宁可慢，也不许给一个偏小的数字。
+func classifyDeltaRec(r usnDeltaRec, root, dataDir string) (deltaKind, string) {
+	// CLOSE 这类不改变任何数字的记录：直接跳过（t7 的白名单，同一个判断）。
+	if !usnReasonIsModifying(r.Reason) {
+		return deltaSkip, ""
+	}
+	switch {
+	case r.IsDir:
+		// 5) 目录体积是聚合值（它自己 + 整棵子树）。增量只知道「这个目录被碰过」，
+		//    不知道子树里少了多少字节，改下去整棵树都会错。
+		return deltaFallback, "记录落在目录上：目录体积是聚合值，增量应用会把整棵子树算错"
+	case r.Reason&(reasonRenameOld|reasonRenameNew) != 0:
+		// 3) 改名是两条记录（旧名 + 新名），FRN 相同的才算一对。没配对就动目录结构，
+		//    等于拿猜的路径去改账。配对要 FRN→路径，那是 Phase 2。
+		return deltaFallback, "改名记录（RENAME_OLD_NAME/RENAME_NEW_NAME）：新旧名字没有配对，目录结构不敢动"
+	case r.Reason&reasonHardLink != 0:
+		// 4) 硬链接数一变，Shared/Unique 的口径就跟着变；快照里没有逐文件的链接数。
+		return deltaFallback, "硬链接数变了：Shared/Unique 口径会连带变，增量改不准"
+	case r.Reason&(reasonCompression|reasonEncryption|reasonIntegrity|reasonReparse) != 0:
+		// 6) 压缩/加密/稀疏/链接点：物理口径或遍历口径会变。
+		return deltaFallback, "压缩/加密/稀疏/重解析点属性变了：物理口径会变"
+	case r.Reason&reasonStream != 0:
+		// 命名数据流不在我们统计的未命名 $DATA 里，但改它的人往往同时改主数据流——
+		// 只看到一条 STREAM_CHANGE 就下结论，容易漏掉主数据流的变化。
+		return deltaFallback, "命名流变化：我们只统计未命名数据流，口径会偏"
+	case r.Reason&reasonEaChange != 0 || r.Reason&reasonSecurity != 0:
+		// owner 会变，Owners 那张表会失真；扩展属性也可能带出体积口径变化。
+		return deltaFallback, "扩展属性/ACL 变化：owner 可能变，Owners 表会失真"
+	case r.Reason&reasonBasicInfo != 0:
+		// mtime 直接进 DayWrites 与 TopFiles 的日期；快照没有逐文件 mtime。
+		return deltaFallback, "mtime/基础属性变化：DayWrites 与 TopFiles 的日期会偏"
+	case r.Reason&reasonFileDelete != 0:
+		// 2) 说删了但快照里没有：说明锚点之后还有更早的改动我们没看到
+		//    （或者这个文件本来就在白名单外），账对不上，别硬减。
+		if !r.InSnapshot {
+			return deltaFallback, "删除记录指向的文件不在快照里：锚点之后可能还有更早的改动没看到"
+		}
+		return deltaDelete, ""
+	case r.Reason&reasonFileCreate != 0:
+		// 1) 新增：路径里有父目录，分类可以确定，所以能补。但要先确认它落在扫描根内、
+		//    且不在我们自己的数据目录里——否则会把工具自己的文件算进用户账上。
+		if ok, why := deltaPathAllowed(r.Path, root, dataDir); !ok {
+			return deltaFallback, why
+		}
+		if r.InSnapshot {
+			// 新建却已经在快照里：期间漏了一条删除（或删了又建），链路上有缺口。
+			return deltaFallback, "新建记录指向快照里已存在的文件：说明期间漏掉了删除"
+		}
+		return deltaCreate, ""
+	case r.Reason&writeMask != 0:
+		// 写：只有知道「原来多大」才能算差。快照没有逐文件表时这条必然回落——
+		// 这正是 Phase 2 要补的那块索引。
+		if !r.InSnapshot {
+			return deltaFallback, "写记录指向的文件不在快照里：没有旧大小可减"
+		}
+		return deltaWrite, ""
+	}
+	// 不认识的位组合：不猜。
+	return deltaFallback, fmt.Sprintf("不认识的 reason 位组合（0x%08x），不猜", r.Reason)
+}
+
+// deltaPathAllowed 检查这条记录的路径能不能进账。
+func deltaPathAllowed(path, root, dataDir string) (bool, string) {
+	low := strings.ToLower(path)
+	if root != "" && !strings.HasPrefix(low, strings.ToLower(strings.TrimRight(root, `\`)+`\`)) {
+		return false, "记录路径不在扫描根内：不往账上算"
+	}
+	if dataDir != "" && (low == dataDir || strings.HasPrefix(low, dataDir+`\`)) {
+		return false, "记录落在工具自己的数据目录里：不往用户账上算"
+	}
+	return true, ""
+}
+
 func newUsnTailer(letter string) (*UsnTailer, error) {
 	h, err := openVolume(letter)
 	if err != nil {
