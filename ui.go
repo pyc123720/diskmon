@@ -386,7 +386,7 @@ func cleanPage(cfg Config, st *Store, cat string) string {
 	if len(groups) > 6 {
 		groups = groups[:6]
 	}
-	b.WriteString(`<div class="card"><h2>按应用聚合</h2><table><tr><th>应用</th><th style="text-align:right">可回收</th><th></th></tr>`)
+	b.WriteString(`<div class="card" id="appgroups"><h2>按应用聚合</h2><table><tr><th>应用</th><th style="text-align:right">可回收</th><th></th></tr>`)
 	for _, g := range groups {
 		b.WriteString(fmt.Sprintf(`<tr><td>%s</td><td class="r">%s</td><td><a class="act" href="/app?name=%s">查看</a></td></tr>`,
 			htmlEscape(g.Name), human(g.Bytes), urlQuery(g.Name)))
@@ -494,8 +494,9 @@ func cleanPageForCat(cfg Config, st *Store, cat string) string {
 		b.WriteString(`<div style="margin-top:10px"><a class="btn" style="background:#1f6f4a;border-color:#33c179" href="/lazy">打开懒人清理（可撤销）</a></div>`)
 	case "confirm":
 		b.WriteString(`<div class="muted">建议先确认：这一类可能含你还要用的内容，工具不会替你一键清掉。</div>`)
-		b.WriteString(`<div class="muted" style="margin-top:6px">按应用/目录逐个看，再决定要不要清。</div>`)
-		b.WriteString(`<div style="margin-top:10px"><a class="btn" href="/apps">按应用查看</a></div>`)
+		b.WriteString(`<div class="muted" style="margin-top:6px">按应用逐个看，再决定要不要清。</div>`)
+		// 这里原来指向 /apps——那个路由不存在，点了就是 404。真正有按应用聚合的是清理中心。
+		b.WriteString(`<div style="margin-top:10px"><a class="btn" href="/clean#appgroups">回清理中心 · 按应用聚合</a></div>`)
 	case "adjust":
 		b.WriteString(`<div class="warn">不要手删。这一类的正确做法是它自己的工具，不是删目录。</div>`)
 		b.WriteString(`<div class="muted" style="margin-top:6px">` + htmlEscape(meta.Hint) + `</div>`)

@@ -709,8 +709,10 @@ func catDetailHTML(cat string, sc *Scan, cfg Config) string {
 			human(sh), sc.HlProbeMB, human(uniq)))
 	}
 	b.WriteString(`</div>`)
+	// 不带 target="_blank"：在 --app 窗口里点分类应当同窗跳转。
+	// 带 _blank 的话每点一次就弹一个新窗口，「像在跳网页」这个观感就是这么来的。
 	b.WriteString(fmt.Sprintf(`<div class="muted" style="margin-top:8px">清理动作要在页面里点：`+
-		`<a href="http://127.0.0.1:%d/clean?cat=%s" target="_blank">只看这一类的清理页</a>`+
+		`<a href="http://127.0.0.1:%d/clean?cat=%s">只看这一类的清理页</a>`+
 		`　（需先运行 <code>diskmon-go serve</code>；这份报告是静态快照，本身不会删任何文件）</div>`,
 		cfg.Port, urlQuery(cat)))
 	b.WriteString(`</div>`)
