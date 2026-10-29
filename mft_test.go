@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -173,6 +174,35 @@ func TestScanVolumeViaMftRejectsNonVolumeRoot(t *testing.T) {
 	} {
 		if sc, ok := scanVolumeViaMft(cfg, root); ok || sc != nil {
 			t.Fatalf("root=%q 不该被 MFT 接走，否则目录数会变成整卷口径", root)
+		}
+	}
+}
+
+// scanVolumeViaMft 用 `base := path[len(dir)+1:]` 取文件名，配合 parentDir。
+// 这行很容易被看错成 off-by-one：parentDir 返回的是不带尾反斜杠的 "C:"（2 字符），
+// 所以 len(dir)+1 正好落在分隔符之后，切出来的就是纯文件名。
+//
+// 它必须成立，否则根目录那几个体积最大的文件——hiberfil.sys / pagefile.sys /
+// swapfile.sys / memory.dmp——会切错名字，专属分类永远匹配不上，全部掉进兜底分类。
+func TestRootLevelBaseNameSplit(t *testing.T) {
+	for _, path := range []string{
+		`C:\hiberfil.sys`,
+		`C:\pagefile.sys`,
+		`C:\swapfile.sys`,
+		`C:\memory.dmp`,
+		`D:\a.bin`,
+		`C:\Windows\System32\foo.dll`,
+		`C:\Users\lenovo\Documents\x.txt`,
+	} {
+		dir := parentDir(path)
+		base := path[len(dir)+1:]
+		want := path[strings.LastIndexByte(path, '\\')+1:]
+		if base != want {
+			t.Fatalf("%q：切成 %q，应为 %q（parentDir 返回 %q）", path, base, want, dir)
+		}
+		// 再确认它确实是「父目录 + 分隔符 + 文件名」这个形状
+		if dir+`\`+base != path {
+			t.Fatalf("%q：dir=%q base=%q 拼不回原路径", path, dir, base)
 		}
 	}
 }
