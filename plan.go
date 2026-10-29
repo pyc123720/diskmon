@@ -172,6 +172,9 @@ func planPreviewPage(cfg Config, st *Store, q *Quarantine, key string) string {
 
 func planApply(cfg Config, st *Store, q *Quarantine, key string) (int, uint64, []string) {
 	p := buildPlan(cfg, st, key)
+	// 一个方案 = 一次清理：整批只落一个还原点，不按目录逐个落。
+	end := beginCleanupRun(st, fmt.Sprintf("一键清理「%s」：%d 个目录 / %s", p.Label, len(p.Dirs), human(p.Bytes)))
+	defer end()
 	var okN int
 	var freed uint64
 	var fails []string

@@ -23,6 +23,7 @@ type opState struct {
 	Finished time.Time
 	IDs      []string
 	Errors   []string
+	Restore  RestorePointOutcome // 本次清理前的系统还原点结论
 }
 
 var (
@@ -61,6 +62,10 @@ func startQuarantineOpReason(cfg Config, st *Store, paths []string, label, reaso
 	opMu.Unlock()
 
 	go func() {
+		// 一次隔离操作 = 一次清理：批次边界在这里标出。几十个目录分批移动，
+		// 还原点只在第一个真删之前落一次——它比这几十次移动都慢，重复落不划算。
+		endRun := beginCleanupRun(st, fmt.Sprintf("%s：%d 个目录", label, len(paths)))
+		defer endRun()
 		q := openQuarantine(cfg)
 		var ids []string
 		var errs []string
@@ -98,6 +103,7 @@ func startQuarantineOpReason(cfg Config, st *Store, paths []string, label, reaso
 		opCur.Bytes = bytes
 		opCur.Files = files
 		opCur.Skipped = skipped
+		opCur.Restore = restorePointSnapshot()
 		opMu.Unlock()
 		if len(ids) > 0 {
 			st.AddAlert("quarantine", fmt.Sprintf("%s：隔离 %d 项，%s（%d 个占用文件跳过）",
@@ -158,6 +164,9 @@ func opPage(cfg Config, st *Store) string {
 		}
 		b.WriteString(`</div>`)
 	}
+	// 系统级回滚点的结论放在结果页上：落成了就写序号，没落成必须写清
+	// 「本次没有系统级回滚点」，不能让人以为还有两层保险其实只有一层。
+	b.WriteString(restorePointHTML(s.Restore))
 	b.WriteString(`<div class="muted" style="margin-top:8px">隔离项默认保留 7 天，可在看板或隔离区还原。</div>`)
 	b.WriteString(`<div style="margin-top:14px"><a class="btn" href="/q">去隔离区</a><a class="btn" href="/">返回总览</a></div>`)
 	b.WriteString(`</div>`)

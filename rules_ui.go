@@ -248,6 +248,9 @@ func ruleRunPage(res RuleResult, real bool) string {
 	if res.Locked > 0 {
 		b.WriteString(fmt.Sprintf(`<div class="muted">%d 个文件被占用而跳过</div>`, res.Locked))
 	}
+	// 规则清理是直接删、不进隔离区的路径：还原点是它唯一的系统级退路。
+	// 落没落成都要写在结果页上；试运行时这里为空——本来就不该落点。
+	b.WriteString(restorePointHTML(res.Restore))
 	b.WriteString(`<a class="btn" href="/rules">返回规则</a>`)
 	return pageShell(title, b.String())
 }

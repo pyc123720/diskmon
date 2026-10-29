@@ -44,6 +44,7 @@ type RuleResult struct {
 	Removed   int
 	Locked    int
 	DryRun    bool
+	Restore   RestorePointOutcome // 本次真删前的系统还原点结论；试运行/跳过时为空
 }
 
 func (st *Store) rulesStatsPath() string {
@@ -162,6 +163,12 @@ func runRule(cfg Config, st *Store, rule CleanRule, forceDry bool) RuleResult {
 		res.Reason = fmt.Sprintf("试运行：可释放 %s（%d 个文件，超过 %d 天未动）",
 			human(res.WouldFree), len(cands), rule.KeepDays)
 	} else {
+		// 真删之前先落一次系统还原点。规则清理是唯一绕过隔离区、直接 os.Remove 的
+		// 路径，所以它必须自己挂一次落点；同一次清理（runDueRules 一轮 / 手工执行
+		// 一条）里只落一次，多批不重复。
+		end := beginCleanupRun(st, fmt.Sprintf("规则「%s」：%s（%d 个超过 %d 天的文件）",
+			rule.Name, rule.Path, len(cands), rule.KeepDays))
+		res.Restore = ensureRestorePoint("")
 		for _, c := range cands {
 			if err := os.Remove(c.p); err == nil {
 				res.Freed += c.n
@@ -170,6 +177,7 @@ func runRule(cfg Config, st *Store, rule CleanRule, forceDry bool) RuleResult {
 				res.Locked++
 			}
 		}
+		end()
 		res.Reason = fmt.Sprintf("已清理 %s（%d 个文件，跳过 %d）", human(res.Freed), res.Removed, res.Locked)
 	}
 	return res
@@ -177,6 +185,10 @@ func runRule(cfg Config, st *Store, rule CleanRule, forceDry bool) RuleResult {
 
 func runDueRules(cfg Config, st *Store, force bool, only string) []RuleResult {
 	var out []RuleResult
+	// 一轮规则清理算「一次清理」：整轮只落一个还原点。逐条规则里那句
+	// beginCleanupRun 此时是嵌套调用，不会重置批次（见 restore_point.go）。
+	end := beginCleanupRun(st, fmt.Sprintf("自动清理一轮：%d 条规则", len(cfg.Rules)))
+	defer end()
 	for _, rule := range cfg.Rules {
 		if only != "" && rule.Name != only {
 			continue

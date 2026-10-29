@@ -323,6 +323,13 @@ func (q *Quarantine) applyWithProgress(cfg Config, path, reason string, onFile f
 		return QEntry{}, fmt.Errorf("隔离区已达上限 %d GB（当前 %s），请先还原或清理超期项",
 			cfg.QuarantineMaxGB, human(q.totalBytes()))
 	}
+	// 真正动文件之前的最后一步：先落一次系统还原点（同一次清理只落一次）。
+	// 位置有讲究——放在守卫、测量、配额这三道拒绝之后，才不会为一次注定
+	// 被拒绝的清理白占卷影空间；放在 rename/复制之前，才是「清理前」。
+	// dry-run 压根走不到这里（runRule 与各预览页在调用 apply 前就分叉了），
+	// 所以这里不需要再判断 DryRun。
+	ensureRestorePoint("隔离目录 " + path)
+
 	id := newID()
 	dest := filepath.Join(q.root, id, filepath.Base(path))
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
