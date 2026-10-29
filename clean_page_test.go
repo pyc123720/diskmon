@@ -5,6 +5,39 @@ import (
 	"testing"
 )
 
+// 分类导航条：按体积降序、当前分类高亮、有回「全部」的口子。
+func TestCatChipsHTML(t *testing.T) {
+	sc := &Scan{Cats: map[string]uint64{
+		"temp":          3 << 30,
+		"system_winsxs": 18 << 30,
+	}}
+	got := catChipsHTML(sc, "temp")
+
+	// 大的排前面
+	if strings.Index(got, "cat=system_winsxs") > strings.Index(got, "cat=temp") {
+		t.Fatalf("分类应按体积降序，实际 WinSxS 排在了 temp 后面")
+	}
+	// 只在有当前分类时才给「全部」，否则点了也没变化
+	if !strings.Contains(got, `href="/clean"`) {
+		t.Fatalf("过滤态下应当有回全部的入口")
+	}
+	if strings.Contains(catChipsHTML(sc, ""), `href="/clean"`) {
+		t.Fatalf("整页视图不该出现指向自己的「全部」按钮")
+	}
+	// 当前分类高亮
+	if !strings.Contains(got, "background:#2a3550") {
+		t.Fatalf("当前分类应当高亮")
+	}
+
+	// 没扫描结果就整块不渲染，别留个空卡片
+	if catChipsHTML(nil, "") != "" {
+		t.Fatalf("无扫描结果时不该渲染导航条")
+	}
+	if catChipsHTML(&Scan{Cats: map[string]uint64{}}, "") != "" {
+		t.Fatalf("分类为空时不该渲染导航条")
+	}
+}
+
 // cleanPage 的 ?cat= 过滤：进入某分类、不认识的分类回落、空分类走整页。
 //
 // 特意不开 HTTP 服务器来测——为了验这段逻辑去起一个进程、占一个端口，

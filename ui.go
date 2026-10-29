@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -318,6 +319,51 @@ func overviewPage(cfg Config, st *Store) string {
 
 // ---------- 清理中心 ----------
 
+// catChipsHTML 是一排分类导航：按体积从大到小，点哪个就只看哪一类。
+//
+// 有了它，分类视图才不是一条死路——从报告点进来之后，还能横向换类、也能回全部。
+// 报告只是入口之一，清理中心自己也得走得通。
+func catChipsHTML(sc *Scan, active string) string {
+	if sc == nil || len(sc.Cats) == 0 {
+		return ""
+	}
+	type chip struct {
+		k string
+		n uint64
+	}
+	arr := make([]chip, 0, len(sc.Cats))
+	for k, n := range sc.Cats {
+		arr = append(arr, chip{k, n})
+	}
+	sort.Slice(arr, func(i, j int) bool {
+		if arr[i].n != arr[j].n {
+			return arr[i].n > arr[j].n
+		}
+		return arr[i].k < arr[j].k
+	})
+
+	var b strings.Builder
+	b.WriteString(`<div class="card" id="catnav"><h2>按分类看</h2>` +
+		`<div style="display:flex;flex-wrap:wrap;gap:8px">`)
+	if active != "" {
+		b.WriteString(`<a class="btn" href="/clean">全部</a>`)
+	}
+	for _, e := range arr {
+		meta, ok := cats[e.k]
+		if !ok {
+			continue
+		}
+		style := ""
+		if e.k == active {
+			style = ` style="background:#2a3550;border-color:#4c8dff"`
+		}
+		b.WriteString(fmt.Sprintf(`<a class="btn" href="/clean?cat=%s"%s>%s <span class="muted">%s</span></a>`,
+			urlQuery(e.k), style, htmlEscape(meta.Label), human(e.n)))
+	}
+	b.WriteString(`</div></div>`)
+	return b.String()
+}
+
 func cleanPage(cfg Config, st *Store, cat string) string {
 	// 不认识的分类键当没传——?cat=/随便写 不能把页面搞成空白。
 	if _, ok := cats[cat]; !ok {
@@ -329,6 +375,7 @@ func cleanPage(cfg Config, st *Store, cat string) string {
 	var b strings.Builder
 	b.WriteString(`<h2 style="margin-top:0">清理中心</h2>`)
 	b.WriteString(`<p class="muted">所有清理动作都先进隔离区，7 天内可还原；永久删除只走 L2 规则。</p>`)
+	b.WriteString(catChipsHTML(st.GetScan(), ""))
 
 	b.WriteString(`<div class="card"><h2>媒体分类</h2><p class="muted">按图片/视频/文档/音频/压缩包拆开看，可只清 30 天前的某一类。</p><a class="btn" href="/media">打开媒体分类</a></div>`)
 	b.WriteString(`<div class="card" style="border-color:#33c17955"><h2>懒人清理</h2><p class="muted">不想挑？一个按钮跑一轮最安全的清理，全部可撤销。</p><a class="btn" style="background:#1f6f4a;border-color:#33c179" href="/lazy">打开懒人清理</a></div>`)
@@ -396,6 +443,7 @@ func cleanPageForCat(cfg Config, st *Store, cat string) string {
 	b.WriteString(`<h2 style="margin-top:0">` + htmlEscape(title) + `</h2>`)
 	b.WriteString(`<div class="muted" style="margin-bottom:12px">正在只看这一类。` +
 		`<a class="act" href="/clean">显示全部分类</a></div>`)
+	b.WriteString(catChipsHTML(st.GetScan(), cat))
 
 	sc := st.GetScan()
 	if sc == nil || len(sc.Cats) == 0 {
