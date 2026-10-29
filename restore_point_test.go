@@ -53,32 +53,33 @@ func stubRestorePoint(t *testing.T, raw restorePointRaw) *restoreStub {
 func (s *restoreStub) count() int { return int(atomic.LoadInt32(&s.calls)) }
 
 // tempVictim 造一个可以被隔离的目录（含一个小文件），并返回它。
-// 落在系统临时目录里，不在包目录下：测试运行期间往当前目录建/删目录，
-// 会让同时进行的 `go test ./...` 遍历目录树时偶发 ENOENT。
+//
+// 位置不能再赌「临时目录在哪」：这些用例测的是还原点触发逻辑，不该顺带考分类器。
+// 老写法是 os.MkdirTemp(os.TempDir(), ...)——只要 TEMP 落进仓库内（仓库在 Documents
+// 下），分类器就判成「用户文档」并拒绝，5 个用例整片变红，而那不是还原点的 bug。
+//
+// 现在改成 t.TempDir() 下挂一个 node_modules 段：分类规则里 \node_modules 是
+// dev_cache（可清），而且它排在 \documents\ 之前，所以无论临时目录落在哪里，
+// 判出来的都是「可清」。前提由构造保证，不再靠环境赏脸。
 func tempVictim(t *testing.T, name string) string {
 	t.Helper()
-	base, err := os.MkdirTemp(os.TempDir(), "diskmon-rp-src")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
-	src := filepath.Join(base, name)
+	src := filepath.Join(t.TempDir(), "node_modules", name)
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(src, "a.bin"), make([]byte, 64*1024), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if why, ok := ruleGuard(Config{}, CleanRule{Path: src}); !ok {
+		t.Fatalf("测试前提不成立：%q 不算「可清」类目录（%s）", src, why)
+	}
 	return src
 }
 
 func newTestQuarantine(t *testing.T) *Quarantine {
 	t.Helper()
-	data, err := os.MkdirTemp(os.TempDir(), "diskmon-rp-data")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(data) })
+	// 隔离区根不走分类器，跟临时目录位置无关；用 t.TempDir() 只是为了自动清理。
+	data := t.TempDir()
 	q := &Quarantine{root: filepath.Join(data, "quarantine"), index: filepath.Join(data, "quarantine", "index.jsonl")}
 	if err := os.MkdirAll(q.root, 0o755); err != nil {
 		t.Fatal(err)
@@ -234,12 +235,15 @@ func TestRestorePointNestedRunsShareOnePoint(t *testing.T) {
 func TestRestorePointDryRunNeverLands(t *testing.T) {
 	st := stubRestorePoint(t, restorePointRaw{OK: true, Seq: 11})
 
-	// 造一个「临时文件」目录：命中 temp 分类，规则守卫放行。
-	dir, err := os.MkdirTemp(os.TempDir(), "diskmon-rp-dry")
-	if err != nil {
+	// 同上：位置不依赖 %TEMP%。node_modules 段让分类稳定落在「开发缓存 / 可清」，
+	// 否则 TEMP 一变位置，规则守卫就把这条用例跳过——那测的就不是 dry-run 了。
+	dir := filepath.Join(t.TempDir(), "node_modules", "dry")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	if why, ok := ruleGuard(Config{}, CleanRule{Path: dir}); !ok {
+		t.Fatalf("测试前提不成立：%q 不算「可清」类目录（%s）", dir, why)
+	}
 	old := time.Now().AddDate(0, 0, -30)
 	for _, n := range []string{"x.tmp", "y.tmp", "z.tmp"} {
 		p := filepath.Join(dir, n)

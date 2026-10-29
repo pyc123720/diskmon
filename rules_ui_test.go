@@ -10,19 +10,20 @@ import (
 )
 
 // testCleanDir 造一个分类上属于「可清」的目录。
-// 规则护栏只放行临时文件 / 缓存类目录，所以测试目录必须落在真实的用户 Temp 下——
-// 随便在项目里建个目录会被 ruleGuard 拒掉，测的就不是保存流程了。
+//
+// 老写法自拼 %LOCALAPPDATA%\Temp：那条路径不保证可写（受限环境里直接
+// 「Access is denied」），用例红得和被测的保存流程毫无关系。现在位置交给
+// t.TempDir()，不再猜 %TEMP% 在哪。
+//
+// 但规则护栏只放行「可清」类目录，t.TempDir() 可能落在仓库内（→ 判「用户文档」）。
+// 所以挂一个 node_modules 段：分类规则里它是 dev_cache（可清），且排在 \documents\
+// 之前，位置便不再影响判定。
 func testCleanDir(t *testing.T) string {
 	t.Helper()
-	base := filepath.Join(os.Getenv("LOCALAPPDATA"), "Temp")
-	if os.Getenv("LOCALAPPDATA") == "" {
-		base = os.TempDir()
-	}
-	dir, err := os.MkdirTemp(base, "diskmon-rules-")
-	if err != nil {
+	dir := filepath.Join(t.TempDir(), "node_modules", "diskmon-rules")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("建临时目录失败：%v", err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	if why, ok := ruleGuard(Config{}, CleanRule{Path: dir}); !ok {
 		t.Fatalf("测试前提不成立：%q 不算「可清」类目录（%s）", dir, why)
 	}
@@ -39,12 +40,48 @@ func withRules(t *testing.T, rules []CleanRule) Config {
 	return cfg
 }
 
+// guardConfigWrite 兜住「测试把配置真的写到磁盘上」这件事。
+//
+// saveConfig 固定写 <exeDir>/config.json；跑测试时 exeDir 取决于测试二进制放在哪
+// （go test 放临时目录、go test -c 放指定路径；某些情况下目录就是包目录）。
+// 无论哪一种，都不该在仓库里留下 config.json，更不该盖掉开发者自己的配置。
+//
+// 做法是不改产品代码：动手前把两个候选位置的原状记下来，测试结束按原状恢复——
+// 原来没有就删掉，原来有就写回原字节。
+func guardConfigWrite(t *testing.T) {
+	t.Helper()
+	type snap struct {
+		path   string
+		data   []byte
+		exists bool
+	}
+	cands := []string{
+		filepath.Join(exeDir(), "config.json"),
+		"config.json", // cwd 就是包目录时的那个位置
+	}
+	snaps := make([]snap, 0, len(cands))
+	for _, p := range cands {
+		b, err := os.ReadFile(p)
+		snaps = append(snaps, snap{path: p, data: b, exists: err == nil})
+	}
+	t.Cleanup(func() {
+		for _, s := range snaps {
+			if s.exists {
+				_ = os.WriteFile(s.path, s.data, 0o644)
+				continue
+			}
+			_ = os.Remove(s.path)
+		}
+	})
+}
+
 // 编辑已有规则必须能存进去。
 //
 // 这条链上真的断过一环：编辑页表单里没有 editing 字段，后端读到的永远是空串，
 // 于是每次保存都被当成「新建」，一头撞进同名判据，只报「已存在同名规则」——
 // 规则一个字都改不了。所以这里分两段验：表单要发，后端要认。
 func TestRuleEditFormCarriesEditing(t *testing.T) {
+	guardConfigWrite(t) // saveRuleFromValues 会真的写配置文件，先兜住
 	dir := testCleanDir(t)
 	const oldName = "旧规则"
 	cfg := withRules(t, []CleanRule{{Name: oldName, Path: dir, MaxSizeMB: 2048, KeepDays: 7, IntervalMin: 60}})
@@ -85,6 +122,7 @@ func TestRuleEditFormCarriesEditing(t *testing.T) {
 // 新建（表单不带 editing）撞上同名，仍然要拒绝——
 // 修编辑不能把这条判据顺手弄松。
 func TestRuleSaveWithoutEditingRejectsDuplicate(t *testing.T) {
+	guardConfigWrite(t) // 同名判据也可能走到保存分支，同样要兜住
 	dir := testCleanDir(t)
 	const name = "同名规则"
 	withRules(t, []CleanRule{{Name: name, Path: dir}})
