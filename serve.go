@@ -737,6 +737,24 @@ func newHTTPHandler(cfg Config, st *Store) http.Handler {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
+		// WinSxS 权威口径（DISM）。**打开页面不跑**，只有点按钮（POST）才起。
+		// 这样做是因为它要 1–2 分钟、要管理员、明显吃 CPU——顺手看一眼页面不该付这个代价。
+		if r.URL.Path == "/winsxs" || r.URL.Path == "/winsxs/run" {
+			if r.URL.Path == "/winsxs/run" {
+				if r.Method != http.MethodPost {
+					// 链接/刷新/外部请求都不能触发：和 /q 那些破坏性动作同一条规矩。
+					w.WriteHeader(http.StatusMethodNotAllowed)
+					_, _ = w.Write([]byte(pageShell("需要按钮", `<div class="warn">这个操作必须用页面上的按钮（POST）触发。</div><a class="btn" href="/winsxs">回 WinSxS 页</a>`)))
+					return
+				}
+				componentStoreStart()
+				http.Redirect(w, r, "/winsxs", http.StatusSeeOther)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(winsxsPageHTML()))
+			return
+		}
 		if r.URL.Path == "/api/scan/progress" {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			b, _ := json.Marshal(scanProgressNow())

@@ -540,6 +540,14 @@ func cleanPageForCat(cfg Config, st *Store, cat string) string {
 		b.WriteString(`<div style="margin-top:10px"><a class="btn" href="/clean#appgroups">回清理中心 · 按应用聚合</a></div>`)
 	case "adjust":
 		b.WriteString(`<div class="warn">不要手删。这一类的正确做法是它自己的工具，不是删目录。</div>`)
+		if cat == "system_winsxs" {
+			// WinSxS 自己扫出来的一定虚高（硬链接），只有 DISM 的口径是真的。
+			// 成本与权限写在按钮上，别让人点了才发现要等两分钟。
+			b.WriteString(`<div class="muted" style="margin-top:8px">这一类按路径求和会虚高（硬链接），` +
+				`真正占多少只有 DISM 说了算。</div>`)
+			b.WriteString(`<div style="margin-top:10px"><a class="btn" href="/winsxs">` +
+				`查 DISM 权威口径（约 1–2 分钟，需要管理员）</a></div>`)
+		}
 		b.WriteString(`<div class="muted" style="margin-top:6px">` + htmlEscape(meta.Hint) + `</div>`)
 	default:
 		b.WriteString(`<div class="muted">建议保留。这不是垃圾，是系统或程序的正常组成部分。</div>`)
