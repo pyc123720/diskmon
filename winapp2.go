@@ -80,7 +80,19 @@ func winapp2Vars() map[string]string {
 }
 
 // winapp2UnsafePath 判断一条解析出来的路径是不是越界了。
-// 只拦「等于」某个系统根的情况——%WinDir%\Temp 这类是合法目标，不能一刀切。
+//
+// 以前的规矩是「只拦等于某个系统根的情况」，理由是 %WinDir%\Temp 这类是合法目标。
+// 但只拦相等，等于把最该拦的那些也放行了：`C:\Windows\System32`、
+// `C:\Users\<你>\Documents` 都被判成安全——而工具自己的清理器对 Documents 是拒绝的，
+// 两套语义就此分叉。
+//
+// 现在的规矩：系统根下面的子目录默认算越界，只放行明确列出的缓存/临时位置；
+// Users 下面只放行 AppData\Local 与 AppData\LocalLow，其余（Documents、Desktop、
+// Downloads、Pictures、Roaming……）一律算越界。
+//
+// 判不准就往「越界」那边靠：被标越界的条目只是不被采纳，误放行的条目会在将来
+// 接线时变成真实风险。Roaming 里放的是浏览器配置、聊天记录这类用户数据，
+// 所以它跟 AppData\Local 区别对待，不是笔误。
 func winapp2UnsafePath(p string) bool {
 	clean := filepath.Clean(p)
 	if strings.Contains(clean, "..") || !filepath.IsAbs(clean) {
@@ -93,12 +105,51 @@ func winapp2UnsafePath(p string) bool {
 	if strings.EqualFold(clean, vol) || strings.EqualFold(clean, vol+`\`) {
 		return true
 	}
-	for _, root := range []string{"Windows", "Program Files", "Program Files (x86)", "ProgramData", "System Volume Information", "Users"} {
-		// 注意：不能用 filepath.Join(vol, root)——Join("C:", "Windows") 会得到
-		// 卷相对路径 "C:Windows"，永远匹配不上。必须显式补分隔符。
-		if strings.EqualFold(clean, vol+string(os.PathSeparator)+root) {
+	sep := string(os.PathSeparator)
+	// under 判断 clean 是否落在 vol\rel 这一支下面（含自身）。
+	// 必须隔着分隔符才算，否则 `%WinDir%\TempX` 会蹭 `%WinDir%\Temp` 的豁免。
+	under := func(rel string) bool {
+		prefix := vol + sep + rel
+		if strings.EqualFold(clean, prefix) {
 			return true
 		}
+		return len(clean) > len(prefix) &&
+			strings.EqualFold(clean[:len(prefix)], prefix) &&
+			clean[len(prefix)] == os.PathSeparator
+	}
+
+	// 系统根：默认越界，只放行这些子目录。
+	for _, root := range []string{
+		"Windows", "Program Files", "Program Files (x86)",
+		"ProgramData", "System Volume Information",
+	} {
+		if !under(root) {
+			continue
+		}
+		for _, ok := range []string{
+			`Windows\Temp`,
+			`Windows\Logs`,
+			`Windows\Prefetch`,
+			`Windows\Minidump`,
+			`Windows\LiveKernelReports`,
+			`Windows\SoftwareDistribution\Download`,
+			`ProgramData\Microsoft\Windows\WER`,
+		} {
+			if under(ok) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Users：只放行 AppData 下的两个缓存分支，用户的数据目录全拦。
+	if under("Users") {
+		parts := strings.Split(strings.TrimPrefix(clean, vol+sep), sep)
+		if len(parts) >= 4 && strings.EqualFold(parts[2], "AppData") &&
+			(strings.EqualFold(parts[3], "Local") || strings.EqualFold(parts[3], "LocalLow")) {
+			return false
+		}
+		return true
 	}
 	return false
 }

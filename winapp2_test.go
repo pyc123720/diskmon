@@ -98,6 +98,9 @@ func TestParseWinapp2SkipsRegistryOnly(t *testing.T) {
 }
 
 // 越界路径必须被识别出来：盘符根、系统根、带 .. 的相对路径。
+//
+// 后半段的几条是补的：旧实现只拦「等于」系统根，于是 System32 和 Documents
+// 这些最该拦的都成了安全路径，跟工具自己清理器的判断相反。
 func TestWinapp2UnsafePaths(t *testing.T) {
 	cases := map[string]bool{
 		`C:\`:                            true,
@@ -108,6 +111,33 @@ func TestWinapp2UnsafePaths(t *testing.T) {
 		`C:\Windows\Temp`:                false,
 		`C:\Users\alice\AppData\Local\X`: false,
 		`D:\Games\Cache`:                 false,
+
+		// 系统根的子目录默认越界
+		`C:\Windows\System32`:                   true,
+		`C:\Windows\System32\config`:            true,
+		`C:\Program Files\App`:                  true,
+		`C:\Program Files (x86)\App`:            true,
+		`C:\System Volume Information`:          true,
+		`C:\System Volume Information\tracking`: true,
+
+		// 豁免不能被前缀蹭到
+		`C:\Windows\TempX`:      true,
+		`C:\Windows\LogsX`:      true,
+		`C:\Windows\Temp2\Deep`: true,
+
+		// 用户数据目录：拿不准就拦，AppData\Local 才是缓存
+		`C:\Users\alice\Documents`:               true,
+		`C:\Users\alice\Documents\Important.txt`: true,
+		`C:\Users\alice\Desktop`:                 true,
+		`C:\Users\alice\Downloads`:               true,
+		`C:\Users\alice\Pictures`:                true,
+		`C:\Users\alice\AppData\Roaming\App`:     true,
+		`C:\Users\alice\AppData\LocalLow\X`:      false,
+
+		// 允许的缓存位置
+		`C:\Windows\Prefetch`:                      false,
+		`C:\Windows\SoftwareDistribution\Download`: false,
+		`C:\ProgramData\Microsoft\Windows\WER`:     false,
 	}
 	for p, want := range cases {
 		if got := winapp2UnsafePath(p); got != want {
