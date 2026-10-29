@@ -138,6 +138,11 @@ func listRootChildren(root string) ([]string, error) {
 
 // ScanRootCached 逐子树扫描（能复用就复用），返回结果和来源
 func ScanRootCached(cfg Config, forceFull bool) (*Scan, string) {
+	// 整次扫描共用一张硬链接身份表——拆成分片并行之后，跨分片的重复
+	// （例如 WinSxS 与 System32）否则会漏掉。本机实测漏掉 2.37 GB。
+	restoreHardlinks := beginHardlinkScope()
+	defer restoreHardlinks()
+
 	children, err := listRootChildren(cfg.Root)
 	if err != nil || len(children) < 2 {
 		return scanVolume(cfg, cfg.Root), "full"
@@ -158,6 +163,17 @@ func ScanRootCached(cfg Config, forceFull bool) (*Scan, string) {
 		useCache = false
 	}
 
+	// MFT 引擎在这里才尝试，位置是有讲究的：
+	// 它要替代的是「昂贵的那一次全量走盘」，而不是增量更新。
+	// 早先它写在函数最开头，结果常驻路径（watch/tray/serve）每次刷新都绕过 USN 缓存、
+	// 重读一遍 MFT 表——每 5 秒读 3 秒，比增量更新还慢。那把加速用成了减速。
+	if !useCache && useMftEngine {
+		if sc, ok := scanVolumeViaMft(cfg, cfg.Root); ok {
+			return sc, "mft"
+		}
+		fmt.Println("  MFT 引擎不可用（需管理员权限 + NTFS），回落到目录遍历")
+	}
+
 	parts := make([]*Scan, 0, len(children))
 	newChildren := map[string]*Scan{}
 	var jobs []string
@@ -173,30 +189,63 @@ func ScanRootCached(cfg Config, forceFull bool) (*Scan, string) {
 		jobs = append(jobs, ch)
 	}
 
-	var mu sync.Mutex
-	sem := make(chan struct{}, scanWorkers)
-	var wg sync.WaitGroup
-	scanned := 0
+	// 把待扫的顶层子树拆成更细的任务，让 worker 抢活，而不是各领一大块。
+	// 硬约束：结果必须按顶层子树归并回「一个子树一个 Scan」——缓存键就是子树路径，
+	// 拆完不归并回去，增量复用会整体失效。
+	var tasks []scanJob
 	for _, ch := range jobs {
-		wg.Add(1)
-		go func(p string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			if scanCancelled() {
-				return
-			}
-			s := scanVolume(cfg, p)
-			mu.Lock()
-			parts = append(parts, s)
-			newChildren[strings.ToLower(p)] = s
-			scanned++
-			mu.Unlock()
-		}(ch)
+		tasks = append(tasks, buildJobs(ch)...)
 	}
-	wg.Wait()
 
-	merged := mergeScans(cfg.Root, compactScans(parts))
+	byParent := make(map[string][]*Scan, len(jobs))
+	scanned := 0
+	if len(tasks) > 0 {
+		var mu sync.Mutex
+		queue := make(chan scanJob)
+		var wg sync.WaitGroup
+		for i := 0; i < scanWorkers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for job := range queue {
+					if scanCancelled() {
+						continue
+					}
+					s := scanVolume(cfg, job.path)
+					s.Root = job.path
+					mu.Lock()
+					key := strings.ToLower(job.parent)
+					byParent[key] = append(byParent[key], s)
+					mu.Unlock()
+				}
+			}()
+		}
+		for _, t := range tasks {
+			queue <- t
+		}
+		close(queue)
+		wg.Wait()
+
+		for _, ch := range jobs {
+			key := strings.ToLower(ch)
+			ps := byParent[key]
+			if len(ps) == 0 {
+				continue // 被取消或整块失败就不写进缓存
+			}
+			unified := mergeChildParts(ch, ps)
+			parts = append(parts, unified)
+			newChildren[key] = unified
+			scanned++
+		}
+	}
+
+	parts = compactScans(parts)
+	// 根目录下的散文件（pagefile.sys / hiberfil.sys / bootmgr…）也必须进账。
+	// 以前整条路径都漏了它们，本机那两个就占 18 GB，导致 Total 比卷已用少一大截。
+	if rf := scanRootFiles(cfg, listRootFiles(cfg.Root)); rf != nil {
+		parts = append(parts, rf)
+	}
+	merged := mergeScans(cfg.Root, parts)
 	merged.Dirs++
 	merged.ReusedChildren = reused
 	merged.ScannedChildren = scanned

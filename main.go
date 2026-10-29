@@ -125,6 +125,18 @@ func main() {
 	case "tray":
 		runTray(cfg, st)
 	case "scan":
+		// 一次性扫描默认走 MFT 直读（约 16× 加速：3s vs 52s）。
+		// 常驻路径不开——它们靠 USN 增量缓存，MFT 成功时不写缓存，反而会每轮全量。
+		// --walk / --no-mft 是出问题时的退路，必须留着。
+		useMftEngine = true
+		for _, a := range os.Args[2:] {
+			switch a {
+			case "--mft", "mft":
+				useMftEngine = true
+			case "--walk", "--no-mft", "walk":
+				useMftEngine = false
+			}
+		}
 		runScan(cfg, st)
 		st.Save()
 	case "report":
@@ -245,6 +257,49 @@ func main() {
 		}
 	case "leftovers":
 		printLeftovers(cfg, st)
+	case "mft-dump":
+		letter := "C"
+		if len(os.Args) > 2 {
+			letter = os.Args[2]
+			// 接受 C: / C:\ / c 这几种写法
+			for len(letter) > 0 && (letter[len(letter)-1] == ':' || letter[len(letter)-1] == '\\') {
+				letter = letter[:len(letter)-1]
+			}
+		}
+		// 默认连对账一起做——这个命令存在的意义就是证明数字对得上
+		// 第 4 个参数可以是 nocompare（跳过对账），也可以是一个文件名（定点查询）
+		compare := true
+		probe := ""
+		pathDiff := false
+		for _, a := range os.Args[3:] {
+			switch a {
+			case "nocompare":
+				compare = false
+			case "paths":
+				// 路径集合直接做差：打印只在遍历/MFT 一方出现的具体路径
+				pathDiff = true
+			case "":
+			default:
+				probe = a
+			}
+		}
+		if pathDiff {
+			reportMftPathDiff(letter)
+			break
+		}
+		reportMftDump(letter, compare, probe)
+	case "walk-count":
+		// 纯遍历计数：不需要管理员，用来量化「遍历自己漏了多少」。
+		// 存在的理由：MFT 和目录遍历对不上时，必须先知道遍历这一侧的盲区有多大，
+		// 否则所有差异都会被默认记到 MFT 头上。
+		letter := "C"
+		if len(os.Args) > 2 {
+			letter = os.Args[2]
+			for len(letter) > 0 && (letter[len(letter)-1] == ':' || letter[len(letter)-1] == '\\') {
+				letter = letter[:len(letter)-1]
+			}
+		}
+		reportWalkCount(letter)
 	case "plans":
 		for _, pl := range allPlans(getConfig(), st) {
 			fmt.Printf("[%s] %d 个目录 · %s\n    %s\n", pl.Label, len(pl.Dirs), human(pl.Bytes), pl.Desc)
@@ -289,5 +344,7 @@ func main() {
 		fmt.Println("已切换开机自启动：", exe)
 	default:
 		fmt.Println("用法：diskmon-go [tray|scan|report|report-open|serve|watch|status|probe|diff|apps|procs|cases]")
+		fmt.Println("      diskmon-go mft-dump [C:] [nocompare|paths|文件名]  只读 MFT 直读 + 对账（需管理员）")
+		fmt.Println("      diskmon-go walk-count [C:]                        只做目录遍历计数，报出自身盲区（不需管理员）")
 	}
 }
