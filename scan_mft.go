@@ -43,25 +43,40 @@ import (
 // 与已知的硬链接少算量级相符。判据过了，才敢把它接到 `scan` 上。
 var useMftEngine bool
 
-// scanVolumeViaMft 尝试用 MFT 完成一次扫描。ok=false 表示不可用，调用方应回落。
-func scanVolumeViaMft(cfg Config, root string) (*Scan, bool) {
-	t0 := time.Now()
-
+// volumeLetter 从「卷根」路径取盘符（C:\ → C）。不是卷根就返回 false。
+//
+// 单独摘出来是因为有两处要用同一个判断：MFT 读的是整卷，USN 日志也按卷走。
+// 各写一份的结果是——一边按 norm 判、另一边按 cfg.Root 判，迟早判出两个不同答案。
+func volumeLetter(root string) (string, bool) {
 	norm := root
 	if !strings.HasSuffix(norm, `\`) {
 		norm += `\`
 	}
 	letter := strings.TrimSuffix(norm, `:\`)
 	if len(letter) != 1 {
-		return nil, false
+		return "", false
 	}
-
 	// 只接「整卷扫描」这一种活。MFT 读的就是整个卷，没法按子目录截。
 	// 文件那一侧还能用 HasPrefix 过滤掉卷外的，但 res.Dirs 是整卷的目录总数，
 	// 没有对应的过滤——若 Root 是 C:\Users 这种子目录，就会把整卷 247,800 个目录
 	// 报成它的目录数。宁可不接，回落遍历反而是对的。
 	if !strings.EqualFold(norm, letter+`:\`) {
+		return "", false
+	}
+	return strings.ToUpper(letter), true
+}
+
+// scanVolumeViaMft 尝试用 MFT 完成一次扫描。ok=false 表示不可用，调用方应回落。
+func scanVolumeViaMft(cfg Config, root string) (*Scan, bool) {
+	t0 := time.Now()
+
+	letter, ok := volumeLetter(root)
+	if !ok {
 		return nil, false
+	}
+	norm := root
+	if !strings.HasSuffix(norm, `\`) {
+		norm += `\`
 	}
 
 	res, paths, files, err := readMft(letter, "")

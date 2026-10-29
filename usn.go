@@ -145,6 +145,81 @@ func createJournal(h syscall.Handle) error {
 	return nil
 }
 
+// ---------- 跨进程增量锚点 ----------
+//
+// usnEventsSince 用的是**进程内**的序号差，出了这个进程就没意义。
+// 所以「这期间到底有没有写入」要做跨进程判断，只能拿卷上 USN 日志自己的坐标去比。
+//
+// 纪律：这里每一个「拒绝」都是**不确定**，不是「大概没变」。
+// 这份数字是给人拿去删东西的，宁可多扫一遍，也不许报一份陈旧账。
+
+// usnAnchor 是某一时刻该卷 USN 日志的坐标。它是纯数值，不是句柄，可以落盘。
+type usnAnchor struct {
+	JournalID uint64 `json:"journal_id"` // 日志的身份：被删掉重建后会变
+	First     int64  `json:"first"`      // 当时日志里最老一条记录的 USN
+	Next      int64  `json:"next"`       // 当时「下一条记录会拿到的」USN
+}
+
+// valid 判断这份坐标本身是否自洽。0 / 负数只可能是没读到或者是假的。
+func (a usnAnchor) valid() bool {
+	return a.JournalID != 0 && a.First > 0 && a.Next > 0 && a.First <= a.Next
+}
+
+// currentUsnAnchor 读一次卷的 USN 日志坐标。需要管理员权限。
+// 读不到就是读不到——调用方必须当成「不确定」，退回全量重扫，不许猜。
+func currentUsnAnchor(letter string) (usnAnchor, error) {
+	h, err := openVolume(letter)
+	if err != nil {
+		return usnAnchor{}, err
+	}
+	defer pCloseHandle.Call(uintptr(h))
+	jd, err := queryJournal(h)
+	if err != nil {
+		return usnAnchor{}, fmt.Errorf("查询 USN 日志失败：%w", err)
+	}
+	a := usnAnchor{JournalID: jd.ID, First: jd.First, Next: jd.Next}
+	if !a.valid() {
+		return usnAnchor{}, fmt.Errorf("USN 日志坐标不可信（id=%d first=%d next=%d）", a.JournalID, a.First, a.Next)
+	}
+	return a, nil
+}
+
+// usnAnchorReader 是 currentUsnAnchor 的间接层。抽出来只有一个理由：
+// 复用判据的单测不该真的去碰一块 NTFS 卷，也不该要求测试进程有管理员权限。
+var usnAnchorReader = currentUsnAnchor
+
+// anchorStillClean 判断「从 prev 到 cur 这段里，这条卷上一条新记录都没有」。
+// 纯函数：不碰系统调用，方便直接测。返回 false 时给出原因，每条都是「不确定」。
+//
+// 判据只有两条是硬要求（journalID 相同、Next 相同），另外两条是把
+// 「日志被换过 / 坐标已经不可解释」这两种情况提前挡掉。
+func anchorStillClean(prev, cur usnAnchor) (bool, string) {
+	if !prev.valid() {
+		// 缓存里的坐标不完整（老版本写的、或者写了一半），没法比。
+		return false, "缓存里的 USN 锚点不完整"
+	}
+	if !cur.valid() {
+		return false, "当前 USN 日志坐标不可信"
+	}
+	if cur.JournalID != prev.JournalID {
+		// 日志被删除重建过：新日志的 USN 从 0 重新长，旧坐标和它没有可比性。
+		return false, "USN 日志已重建（journalID 变了）"
+	}
+	if cur.Next < prev.Next {
+		// USN 只会单调递增。变小说明日志回绕或被截断了，旧坐标不可解释。
+		return false, "USN 回退（日志被截断或回绕）"
+	}
+	if cur.First > prev.Next {
+		// 我们记录的那个位置已经被挤出日志窗口：它之后发生了什么已经无从得知。
+		return false, "锚点已滚出 USN 日志窗口"
+	}
+	if cur.Next != prev.Next {
+		return false, "锚点之后有新的 USN 记录"
+	}
+	// 到这里 Next 相同 —— 日志里没有新记录，也没有被清理过（清理本身由写入触发）。
+	return true, ""
+}
+
 func newUsnTailer(letter string) (*UsnTailer, error) {
 	h, err := openVolume(letter)
 	if err != nil {
