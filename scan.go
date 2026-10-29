@@ -180,7 +180,8 @@ func isReparse(info fs.FileInfo) bool {
 func scanVolume(cfg Config, root string) *Scan {
 	t0 := time.Now()
 	sc := &Scan{
-		TS: t0.Unix(), Cats: map[string]uint64{}, Owners: map[string]uint64{},
+		TS: t0.Unix(), Cats: map[string]uint64{}, CatsShared: map[string]uint64{},
+		Owners:    map[string]uint64{},
 		Protected: map[string]uint64{}, DayWrites: map[string]uint64{},
 	}
 	nodes := map[string]uint64{}
@@ -196,6 +197,10 @@ func scanVolume(cfg Config, root string) *Scan {
 	}
 	rootLen := len(root)
 	seen := 0
+	// 硬链接去重：身份表在整次扫描内共享，跨分片（WinSxS / System32）也能判重
+	hl := activeHardlinks()
+	var sharedBytes uint64
+	sc.HlProbeMB = int(hardlinkProbeMin >> 20)
 	// 目录分类缓存：目录只有 24 万个，文件有 68 万个，按目录缓存能省掉绝大多数规则匹配
 	dirCat := map[string]string{}
 	dirProt := map[string]string{}
@@ -262,6 +267,12 @@ func scanVolume(cfg Config, root string) *Scan {
 			cat = "logs_dumps"
 		}
 		sc.Cats[cat] += size
+		// 硬链接：同一份数据的第二个名字算「重复计入」，记到它所属的分类上。
+		// 这样分类视图不再拿一个含重复的数字冒充物理占用。
+		if hardlinkProbeMin > 0 && size >= hardlinkProbeMin && hl.observe(path, size) {
+			sharedBytes += size
+			sc.CatsShared[cat] += size
+		}
 
 		rel := strings.TrimPrefix(path, root)
 		rel = strings.TrimPrefix(rel, `\`)
@@ -339,6 +350,8 @@ func scanVolume(cfg Config, root string) *Scan {
 	for _, b := range bigs {
 		sc.TopFiles = append(sc.TopFiles, FileEntry{Path: b.path, Bytes: b.bytes, MTime: b.mtime})
 	}
+	sc.Shared = sharedBytes
+	sc.Unique = uniqueBytes(sc.Total, sc.Shared)
 	sc.Duration = time.Since(t0).Seconds()
 	return sc
 }
@@ -377,6 +390,10 @@ func runScan(cfg Config, st *Store) *Scan {
 	usnMark()
 	fmt.Printf("完成：%d 文件 / %d 目录，合计 %s，耗时 %.1fs，跳过 %d 处\n",
 		sc.Files, sc.Dirs, human(sc.Total), sc.Duration, sc.Errors)
+	if sc.Shared > 0 {
+		fmt.Printf("       其中 %s 是被硬链接重复计入的（探测范围 >=%d MB）；去重后约 %s\n",
+			human(sc.Shared), sc.HlProbeMB, human(sc.Unique))
+	}
 	for i := 0; i < len(sc.Dirs3) && i < 6; i++ {
 		e := sc.Dirs3[i]
 		fmt.Printf("  %-60s %10s  %s\n", e.Path, human(e.Bytes), cats[e.Cat].Label)

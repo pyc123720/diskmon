@@ -185,7 +185,16 @@ type Scan struct {
 	Duration float64           `json:"duration"`
 	Used     uint64            `json:"used"`
 	Free     uint64            `json:"free"`
-	Cats     map[string]uint64 `json:"cats"`
+	// 硬链接口径。Total 是「按路径求和」（逻辑体积，资源管理器也这么报）；
+	// Shared 是其中被重复计入的部分（下限，只覆盖 >=HlProbeMB 的文件）；
+	// Unique = Total - Shared，才是敢跟「卷已用」对照的物理占用近似。
+	Shared    uint64 `json:"shared"`
+	Unique    uint64 `json:"unique"`
+	HlProbeMB int    `json:"hl_probe_mb"`
+	Cats map[string]uint64 `json:"cats"`
+	// CatsShared 是每个分类里「被硬链接重复计入」的字节（下限，仅覆盖 >=HlProbeMB 的文件）。
+	// Cats 仍是按路径求和，与 Total 同口径；用 Cats[x]-CatsShared[x] 才是该分类的物理占用。
+	CatsShared map[string]uint64 `json:"cats_shared,omitempty"`
 	Dirs3    []DirEntry        `json:"dirs3"`
 	Deep     []DirEntry        `json:"deep"`
 	TopFiles []FileEntry       `json:"top_files"`

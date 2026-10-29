@@ -201,7 +201,17 @@ func renderPage(cfg Config, st *Store) string {
 		})
 		for _, e := range arr {
 			meta := cats[e.cat]
-			b.WriteString(barRow(meta.Label, e.b, total, tierColor[meta.Tier], tierText[meta.Tier], meta.Hint))
+			label, tip := meta.Label, meta.Hint
+			if sh := sc.CatsShared[e.cat]; sh > 0 {
+				unique := uint64(0)
+				if e.b > sh {
+					unique = e.b - sh
+				}
+				label = fmt.Sprintf("%s（其中 %s 与系统目录共享）", meta.Label, human(sh))
+				tip = fmt.Sprintf("%s；按路径求和含硬链接重复，去重后约 %s（探测范围 ≥%d MB，是下限）",
+					tip, human(unique), sc.HlProbeMB)
+			}
+			b.WriteString(barRow(label, e.b, total, tierColor[meta.Tier], tierText[meta.Tier], tip))
 		}
 	} else {
 		b.WriteString("<div class=\"empty\">尚未扫描</div>")
@@ -210,6 +220,15 @@ func renderPage(cfg Config, st *Store) string {
 	var cleanB, confirmB, adjustB, keepB uint64
 	if sc != nil {
 		for c, n := range sc.Cats {
+			// 用去重后的字节算可回收量：同一份数据不可能被回收两次，
+			// 否则「可删占比」会被硬链接撑大，点下去又腾不出那么多。
+			if sh := sc.CatsShared[c]; sh > 0 {
+				if sh >= n {
+					n = 0
+				} else {
+					n -= sh
+				}
+			}
 			switch cats[c].Tier {
 			case "clean":
 				cleanB += n
