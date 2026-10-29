@@ -122,6 +122,17 @@ window.addEventListener('load',report);
 var t=null;
 window.addEventListener('resize',function(){clearTimeout(t);t=setTimeout(report,800);});
 setTimeout(report,1200);
+// 浏览器没有 move 事件：只靠 resize 的话，用户「拖动」窗口位置根本不会被记下来。
+// 所以再加两条：位置变了就定时补报一次，以及关窗前最后报一次。
+var last='';
+function reportIfMoved(){
+var k=[Math.round(window.screenX||0),Math.round(window.screenY||0),
+Math.round(window.outerWidth||0),Math.round(window.outerHeight||0)].join(',');
+if(k!==last){last=k;report();}
+}
+setInterval(reportIfMoved,2000);
+window.addEventListener('pagehide',report);
+window.addEventListener('beforeunload',report);
 document.addEventListener('contextmenu',function(e){e.preventDefault();},true);
 document.addEventListener('keydown',function(e){
 var k=(e.key||'').toLowerCase();
