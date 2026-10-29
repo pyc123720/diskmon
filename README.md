@@ -29,9 +29,13 @@ needs three confirmations.
 
 ## Screenshots
 
-| Overview (dark) | Cleanup sections |
+| Overview | Cleanup center |
 |---|---|
 | <img src="docs/screenshots/overview-zh.png" width="46%"> | ![sections](docs/screenshots/clean-zh.png) |
+
+| Space treemap | Quarantine — a move, not an erase |
+|---|---|
+| ![treemap](docs/screenshots/treemap-zh.png) | ![quarantine](docs/screenshots/quarantine-zh.png) |
 
 | English UI | Lazy clean preview |
 |---|---|
