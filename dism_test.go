@@ -163,7 +163,7 @@ func TestAnalyzeComponentStoreFailurePaths(t *testing.T) {
 	if !strings.Contains(cs.Err, "740") {
 		t.Fatalf("错误应当带上退出码，实际 %q", cs.Err)
 	}
-	if !strings.Contains(cs.Raw, "错误") {
+	if gbkFixtureUsable(t) && !strings.Contains(cs.Raw, "错误") {
 		t.Fatalf("原文片段应当能解码出中文，实际 %q", cs.Raw)
 	}
 
@@ -229,7 +229,27 @@ func TestPlainComponentStoreSaysDism(t *testing.T) {
 }
 
 // DISM 往管道里写的是 ANSI 代码页字节，不是 UTF-8：这条夹具就是本机抓到的 GBK 原文。
+// gbkFixtureUsable 说明这段 GBK 夹具在当前系统上能不能被解对。
+//
+// decodeConsoleOutput 走的是 CP_ACP（系统当前 ANSI 代码页），不是硬编码 936——
+// 因为 DISM 往管道里写的就是控制台代码页的字节。本机 ACP=936 时夹具有中文；
+// GitHub 的英文 Windows 镜像 ACP=1252，同样的字节会被当单字节解码，出来是 "´íÎó"。
+//
+// 这不是代码错，是夹具对系统有要求。依赖它的断言在别的代码页上应当跳过，
+// 并把原因写进日志——不然 CI 红了看上去像功能坏了。
+func gbkFixtureUsable(t *testing.T) bool {
+	t.Helper()
+	cp, _, _ := procGetACP.Call()
+	if cp != 936 {
+		t.Logf("这台系统的 ANSI 代码页是 %d，不是 936；GBK 夹具在这里解不出中文，跳过依赖它的断言", cp)
+		return false
+	}
+	return true
+}
 func TestDecodeConsoleOutputGBK(t *testing.T) {
+	if !gbkFixtureUsable(t) {
+		t.Skip("夹具是 GBK 字节，这台系统的代码页不是 936")
+	}
 	got := decodeConsoleOutput(realDismNotElevated)
 	for _, want := range []string{"错误: 740", "需要提升权限"} {
 		if !strings.Contains(got, want) {
