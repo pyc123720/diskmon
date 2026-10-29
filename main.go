@@ -228,7 +228,17 @@ func main() {
 			}())
 		}
 	case "open":
-		openAppWindow(cfg.Port)
+		// 桌面图标跑的就是这条。以前它只开浏览器、不管服务，服务没运行时
+		// 点图标只会得到一个打不开的窗口，还不给任何解释——用户管这叫「又进不去了」。
+		// 现在：先探端口，没服务就自己拉起来；实在起不来，至少把静态报告打开。
+		if ensureServer(cfg.Port) {
+			openAppWindow(cfg.Port)
+		} else {
+			p := writeReport(cfg, st)
+			fmt.Println("后台服务没起来，已改为打开静态报告：", p)
+			fmt.Println("要看可交互的界面（清理、设置），请手动运行： diskmon-go tray")
+			openPath(p)
+		}
 	case "health":
 		fmt.Println(healthSnapshot(cfg, st).Text())
 	case "diag":
