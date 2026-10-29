@@ -128,6 +128,19 @@ func renderPage(cfg Config, st *Store) string {
 	b.WriteString("<div style=\"display:flex;justify-content:center\">" + ring + "</div>")
 	b.WriteString(fmt.Sprintf("<div class=\"kpi\" style=\"justify-content:center\"><div><span class=\"big\">%.2f</span><span class=\"unit\"> GB 剩余</span></div><div class=\"muted\">阈值 %.0f/%.0f/%.0f GB</div></div>",
 		freeGB, cfg.WarnGB, cfg.DangerGB, cfg.CriticalGB))
+	// 「已用」和「扫描合计」天然对不上，差额不是错误：
+	// 读不到的目录整棵子树被跳过、NTFS 元文件也不在用户文件合计里。
+	// 不把这个差和它的成因一起摆出来，用户只会以为统计错了。
+	if sc != nil && sc.Total > 0 && v.Used > sc.Total {
+		gap := v.Used - sc.Total
+		why := "NTFS 元文件（$MFT、日志等）"
+		if sc.Errors > 0 {
+			why = fmt.Sprintf("NTFS 元文件 + %d 处读不到的目录（整棵子树未计入）", sc.Errors)
+		}
+		b.WriteString(fmt.Sprintf("<div class=\"muted\" style=\"margin-top:6px;line-height:1.7\">"+
+			"已用 %s　·　扫描合计 %s　·　差 %s<br>差额来自%s。这是预期内的，不是统计错误。</div>",
+			human(v.Used), human(sc.Total), human(gap), why))
+	}
 	b.WriteString(volumesHTML(cfg.Root))
 	b.WriteString("</div>")
 
