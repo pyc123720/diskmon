@@ -36,6 +36,18 @@ h1{font-size:19px;margin:0;font-weight:600}
 .bval{text-align:right;font-size:12px;font-family:Consolas,monospace}
 .bpct{color:#8b94a7;margin-left:6px;font-size:11px}
 .tag{font-size:10px;padding:1px 6px;border-radius:5px;margin-left:8px;background:#232a36;color:#9aa6bb}
+/* 分类行可展开：点一下看这一类里最大的目录、能不能清、怎么清 */
+.catdet{margin:0}
+.catdet>summary{list-style:none;cursor:pointer;border-radius:6px}
+.catdet>summary::-webkit-details-marker{display:none}
+.catdet>summary:hover{background:#1a1f29}
+.catdet>summary .blabel::after{content:"  ▸";color:#5b6478;font-size:10px}
+.catdet[open]>summary .blabel::after{content:"  ▾"}
+.catbox{padding:10px 12px 12px;margin:2px 0 8px;background:#161b23;border-radius:8px;border:1px solid #1e2430}
+.catbox h4{margin:0 0 6px;font-size:11.5px;color:#8b94a7;font-weight:500}
+.catbox table{font-size:11.5px}
+.catbox th,.catbox td{padding:4px 6px}
+.catwhy{color:#9aa6bb;font-size:12px;line-height:1.7;margin:6px 0 0}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #1e2430}
 th{color:#8b94a7;font-weight:500;font-size:11.5px}
@@ -224,7 +236,9 @@ func renderPage(cfg Config, st *Store) string {
 				tip = fmt.Sprintf("%s；按路径求和含硬链接重复，去重后约 %s（探测范围 ≥%d MB，是下限）",
 					tip, human(unique), sc.HlProbeMB)
 			}
-			b.WriteString(barRow(label, e.b, total, tierColor[meta.Tier], tierText[meta.Tier], tip))
+			b.WriteString(`<details class="catdet"><summary>` +
+				barRow(label, e.b, total, tierColor[meta.Tier], tierText[meta.Tier], tip) +
+				`</summary>` + catDetailHTML(e.cat, sc, cfg) + `</details>`)
 		}
 	} else {
 		b.WriteString("<div class=\"empty\">尚未扫描</div>")
@@ -615,6 +629,77 @@ func svgProjection(f Forecast, freeGB float64, cfg Config) string {
 		b.WriteString(fmt.Sprintf(`<text x="%.1f" y="%.0f" text-anchor="middle" fill="#8b94a7" font-size="10">+%dd</text>`, X(float64(i)), h-8, i))
 	}
 	b.WriteString("</svg>")
+	return b.String()
+}
+
+// catDetailHTML 是一个分类行展开后的内容：这一类里最大的几处目录、能不能清、怎么清。
+//
+// 报告是静态快照，清理动作走不了（真要删得在 serve 模式下点），
+// 所以这里给「证据 + 判断 + 入口」三件事，不假装能在报告里一键删。
+func catDetailHTML(cat string, sc *Scan, cfg Config) string {
+	var b strings.Builder
+	meta := cats[cat]
+
+	sum := sc.Cats[cat]
+	uniq := sum
+	if sh := sc.CatsShared[cat]; sh > 0 && sh < sum {
+		uniq = sum - sh
+	}
+
+	b.WriteString(`<div class="catbox"><h4>这一类里体积最大的路径</h4>`)
+
+	// 深度 4 的目录列表覆盖 >=64MB 的；深度 3 的只是前 15 条，作补充。
+	type dr struct {
+		p string
+		n uint64
+	}
+	var dirs []dr
+	for _, list := range [][]DirEntry{sc.Deep, sc.Dirs3} {
+		for _, e := range list {
+			if e.Cat == cat {
+				dirs = append(dirs, dr{e.Path, e.Bytes})
+			}
+		}
+	}
+	sort.Slice(dirs, func(i, j int) bool { return dirs[i].n > dirs[j].n })
+	if len(dirs) > 8 {
+		dirs = dirs[:8]
+	}
+	if len(dirs) > 0 {
+		b.WriteString(`<table>`)
+		for _, d := range dirs {
+			b.WriteString(fmt.Sprintf(`<tr><td class="path">%s</td><td class="r">%s</td></tr>`,
+				html.EscapeString(d.p), human(d.n)))
+		}
+		b.WriteString(`</table>`)
+	} else {
+		// 注意：这里没有大路径不等于「零散小文件」。pagefile.sys / hiberfil.sys
+		// 这类是单个巨大的文件，深度前缀算不到 64 MB 以上，别乱下结论。
+		b.WriteString(`<div class="muted">没有超过 64 MB 的路径记录——体积可能集中在卷根的大文件上` +
+			`（如 pagefile.sys / hiberfil.sys），也可能就是大量零散文件，这里看不出来。</div>`)
+	}
+
+	b.WriteString(`<div class="catwhy">` + html.EscapeString(meta.Hint) + `<br>`)
+	switch meta.Tier {
+	case "clean":
+		b.WriteString("判断：<b>可再生</b>，清掉会自动重建，不会丢数据。走「懒人清理」全部先进隔离区，7 天内可还原。")
+	case "confirm":
+		b.WriteString("判断：<b>先确认再清</b>。看一眼对应软件的设置，别把还要用的离线内容带走。")
+	case "adjust":
+		b.WriteString("判断：<b>不要手删</b>。这类目录删错会导致软件无法修复或卸载，用对应工具自己的清理入口。")
+	default:
+		b.WriteString("判断：<b>建议保留</b>。这不是垃圾，是系统或程序的正常组成部分。")
+	}
+	if sh := sc.CatsShared[cat]; sh > 0 {
+		b.WriteString(fmt.Sprintf("<br>其中 %s 是与别处共享的硬链接（下限，只覆盖 ≥%d MB 的文件），实际占空间约 %s。",
+			human(sh), sc.HlProbeMB, human(uniq)))
+	}
+	b.WriteString(`</div>`)
+	b.WriteString(fmt.Sprintf(`<div class="muted" style="margin-top:8px">清理动作要在页面里点：`+
+		`<a href="http://127.0.0.1:%d/clean" target="_blank">打开清理中心</a>`+
+		`　（需先运行 <code>diskmon-go serve</code>；这份报告是静态快照，本身不会删任何文件）</div>`,
+		cfg.Port))
+	b.WriteString(`</div>`)
 	return b.String()
 }
 
