@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -783,6 +784,34 @@ func newHTTPHandler(cfg Config, st *Store) http.Handler {
 			}
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			_ = json.NewEncoder(w).Encode(payload)
+			return
+		}
+		// 窗口位置/大小回传。页面在应用模式下把几何发过来，下次 open 时原样还原。
+		// 成功/失败必须分开说，否则「204」既可能是存好了也可能是压根没解出来。
+		if r.URL.Path == "/api/geom" {
+			if r.Method != http.MethodPost {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			raw, _ := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<12))
+			var g uiGeom
+			err := json.Unmarshal(raw, &g)
+			if err == nil {
+				err = saveUIGeom(g)
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"error": err.Error(),
+					"got":   string(raw),
+					"path":  uiGeomPath(),
+				})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok": true, "x": g.X, "y": g.Y, "w": g.W, "h": g.H, "path": uiGeomPath(),
+			})
 			return
 		}
 		if r.URL.Path == "/favicon.ico" {

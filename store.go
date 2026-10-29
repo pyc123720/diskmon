@@ -14,26 +14,26 @@ import (
 // ---------- 配置 ----------
 
 type Config struct {
-	DataDir         string   `json:"data_dir"`
-	Root            string   `json:"scan_root"`
-	Port            int      `json:"port"`
-	IntervalSec     int      `json:"interval_sec"`
-	AlertMinDeltaMB int      `json:"alert_min_delta_mb"`
-	WarnGB          float64  `json:"warn_free_gb"`
-	DangerGB        float64  `json:"danger_free_gb"`
-	CriticalGB      float64  `json:"critical_free_gb"`
-	WarnPct         float64  `json:"warn_free_pct"`
-	DangerPct       float64  `json:"danger_free_pct"`
-	CriticalPct     float64  `json:"critical_free_pct"`
-	Whitelist       []string `json:"whitelist"`
-	UseToast        bool     `json:"use_toast"` // 用 PowerShell 一次性 toast（默认）；false 则只用气泡
-	QuarantineDays  int      `json:"quarantine_days"`
+	DataDir         string      `json:"data_dir"`
+	Root            string      `json:"scan_root"`
+	Port            int         `json:"port"`
+	IntervalSec     int         `json:"interval_sec"`
+	AlertMinDeltaMB int         `json:"alert_min_delta_mb"`
+	WarnGB          float64     `json:"warn_free_gb"`
+	DangerGB        float64     `json:"danger_free_gb"`
+	CriticalGB      float64     `json:"critical_free_gb"`
+	WarnPct         float64     `json:"warn_free_pct"`
+	DangerPct       float64     `json:"danger_free_pct"`
+	CriticalPct     float64     `json:"critical_free_pct"`
+	Whitelist       []string    `json:"whitelist"`
+	UseToast        bool        `json:"use_toast"` // 用 PowerShell 一次性 toast（默认）；false 则只用气泡
+	QuarantineDays  int         `json:"quarantine_days"`
 	Rules           []CleanRule `json:"rules"`
-	AutoScanHours   int        `json:"auto_scan_hours"`
-	QuarantineMaxGB int        `json:"quarantine_max_gb"`
-	NotifyMinMB     int        `json:"notify_min_delta_mb"`
-	LazyAuto        string     `json:"lazy_auto"`       // off | daily | weekly
-	LazyAutoHour    int        `json:"lazy_auto_hour"`  // 0-23
+	AutoScanHours   int         `json:"auto_scan_hours"`
+	QuarantineMaxGB int         `json:"quarantine_max_gb"`
+	NotifyMinMB     int         `json:"notify_min_delta_mb"`
+	LazyAuto        string      `json:"lazy_auto"`      // off | daily | weekly
+	LazyAutoHour    int         `json:"lazy_auto_hour"` // 0-23
 }
 
 func defaultConfig() Config {
@@ -45,10 +45,10 @@ func defaultConfig() Config {
 		AlertMinDeltaMB: 120,
 		WarnGB:          20, DangerGB: 10, CriticalGB: 5,
 		WarnPct: 15, DangerPct: 8, CriticalPct: 4,
-		Whitelist: []string{`\.ssh`, `\.git`, `\documents\`, `\desktop\`, `\source\repos`, `\.env`, `\pictures\`},
-		UseToast:  true,
-		QuarantineDays: 7,
-		AutoScanHours:  24,
+		Whitelist:       []string{`\.ssh`, `\.git`, `\documents\`, `\desktop\`, `\source\repos`, `\.env`, `\pictures\`},
+		UseToast:        true,
+		QuarantineDays:  7,
+		AutoScanHours:   24,
 		QuarantineMaxGB: 20,
 		NotifyMinMB:     500,
 		LazyAuto:        "off",
@@ -86,29 +86,63 @@ func loadConfig() Config {
 	if dataDirRequested == "" {
 		dataDirRequested = cfg.DataDir
 	}
+	// 窗口几何存在数据目录里——那是这个程序已经证明可写的地方。
+	uiGeomFile = filepath.Join(cfg.DataDir, "ui-window.json")
 	rotateLog(cfg.DataDir)
 	return cfg
 }
 
 func validateConfig(c *Config) {
-	if c.IntervalSec < 1 { c.IntervalSec = 1 }
-	if c.IntervalSec > 3600 { c.IntervalSec = 3600 }
-	if c.AlertMinDeltaMB < 1 { c.AlertMinDeltaMB = 1 }
-	if c.Port < 1024 || c.Port > 65535 { c.Port = 8766 }
-	if c.QuarantineDays < 1 || c.QuarantineDays > 365 { c.QuarantineDays = 7 }
-	if c.AutoScanHours < 0 || c.AutoScanHours > 720 { c.AutoScanHours = 24 }
-	if c.QuarantineMaxGB <= 0 || c.QuarantineMaxGB > 2000 { c.QuarantineMaxGB = 20 }
-	if c.NotifyMinMB < 0 || c.NotifyMinMB > 1000000 { c.NotifyMinMB = 500 }
-	if c.LazyAuto != "daily" && c.LazyAuto != "weekly" { c.LazyAuto = "off" }
-	if c.LazyAutoHour < 0 || c.LazyAutoHour > 23 { c.LazyAutoHour = 3 }
-	if c.WarnGB <= 0 { c.WarnGB = 20 }
-	if c.DangerGB <= 0 || c.DangerGB >= c.WarnGB { c.DangerGB = c.WarnGB / 2 }
-	if c.CriticalGB <= 0 || c.CriticalGB >= c.DangerGB { c.CriticalGB = c.DangerGB / 2 }
+	if c.IntervalSec < 1 {
+		c.IntervalSec = 1
+	}
+	if c.IntervalSec > 3600 {
+		c.IntervalSec = 3600
+	}
+	if c.AlertMinDeltaMB < 1 {
+		c.AlertMinDeltaMB = 1
+	}
+	if c.Port < 1024 || c.Port > 65535 {
+		c.Port = 8766
+	}
+	if c.QuarantineDays < 1 || c.QuarantineDays > 365 {
+		c.QuarantineDays = 7
+	}
+	if c.AutoScanHours < 0 || c.AutoScanHours > 720 {
+		c.AutoScanHours = 24
+	}
+	if c.QuarantineMaxGB <= 0 || c.QuarantineMaxGB > 2000 {
+		c.QuarantineMaxGB = 20
+	}
+	if c.NotifyMinMB < 0 || c.NotifyMinMB > 1000000 {
+		c.NotifyMinMB = 500
+	}
+	if c.LazyAuto != "daily" && c.LazyAuto != "weekly" {
+		c.LazyAuto = "off"
+	}
+	if c.LazyAutoHour < 0 || c.LazyAutoHour > 23 {
+		c.LazyAutoHour = 3
+	}
+	if c.WarnGB <= 0 {
+		c.WarnGB = 20
+	}
+	if c.DangerGB <= 0 || c.DangerGB >= c.WarnGB {
+		c.DangerGB = c.WarnGB / 2
+	}
+	if c.CriticalGB <= 0 || c.CriticalGB >= c.DangerGB {
+		c.CriticalGB = c.DangerGB / 2
+	}
 	for i := range c.Rules {
 		r := &c.Rules[i]
-		if r.IntervalMin < 1 { r.IntervalMin = 60 }
-		if r.KeepDays < 1 { r.KeepDays = 1 }
-		if r.MaxSizeMB < 1 { r.MaxSizeMB = 1 }
+		if r.IntervalMin < 1 {
+			r.IntervalMin = 60
+		}
+		if r.KeepDays < 1 {
+			r.KeepDays = 1
+		}
+		if r.MaxSizeMB < 1 {
+			r.MaxSizeMB = 1
+		}
 	}
 }
 
@@ -173,34 +207,34 @@ type FileEntry struct {
 }
 
 type Scan struct {
-	Root     string            `json:"root"`
-	Source   string            `json:"source"` // full / incremental / cached
-	ReusedChildren  int        `json:"reused_children"`
-	ScannedChildren int        `json:"scanned_children"`
-	TS       int64             `json:"ts"`
-	Total    uint64            `json:"total"`
-	Files    int               `json:"files"`
-	Dirs     int               `json:"dirs"`
-	Errors   int               `json:"errors"`
-	Duration float64           `json:"duration"`
-	Used     uint64            `json:"used"`
-	Free     uint64            `json:"free"`
+	Root            string  `json:"root"`
+	Source          string  `json:"source"` // full / incremental / cached
+	ReusedChildren  int     `json:"reused_children"`
+	ScannedChildren int     `json:"scanned_children"`
+	TS              int64   `json:"ts"`
+	Total           uint64  `json:"total"`
+	Files           int     `json:"files"`
+	Dirs            int     `json:"dirs"`
+	Errors          int     `json:"errors"`
+	Duration        float64 `json:"duration"`
+	Used            uint64  `json:"used"`
+	Free            uint64  `json:"free"`
 	// 硬链接口径。Total 是「按路径求和」（逻辑体积，资源管理器也这么报）；
 	// Shared 是其中被重复计入的部分（下限，只覆盖 >=HlProbeMB 的文件）；
 	// Unique = Total - Shared，才是敢跟「卷已用」对照的物理占用近似。
-	Shared    uint64 `json:"shared"`
-	Unique    uint64 `json:"unique"`
-	HlProbeMB int    `json:"hl_probe_mb"`
-	Cats map[string]uint64 `json:"cats"`
+	Shared    uint64            `json:"shared"`
+	Unique    uint64            `json:"unique"`
+	HlProbeMB int               `json:"hl_probe_mb"`
+	Cats      map[string]uint64 `json:"cats"`
 	// CatsShared 是每个分类里「被硬链接重复计入」的字节（下限，仅覆盖 >=HlProbeMB 的文件）。
 	// Cats 仍是按路径求和，与 Total 同口径；用 Cats[x]-CatsShared[x] 才是该分类的物理占用。
 	CatsShared map[string]uint64 `json:"cats_shared,omitempty"`
-	Dirs3    []DirEntry        `json:"dirs3"`
-	Deep     []DirEntry        `json:"deep"`
-	TopFiles []FileEntry       `json:"top_files"`
-	Owners   map[string]uint64 `json:"owners"`
-	Protected map[string]uint64 `json:"protected"`
-	DayWrites map[string]uint64 `json:"day_writes"`
+	Dirs3      []DirEntry        `json:"dirs3"`
+	Deep       []DirEntry        `json:"deep"`
+	TopFiles   []FileEntry       `json:"top_files"`
+	Owners     map[string]uint64 `json:"owners"`
+	Protected  map[string]uint64 `json:"protected"`
+	DayWrites  map[string]uint64 `json:"day_writes"`
 }
 
 type Sample struct {
@@ -239,7 +273,7 @@ type Store struct {
 	path         string
 	st           State
 	lastAlertKey string
-	lastAlertTS int64
+	lastAlertTS  int64
 	suppressed   int
 }
 

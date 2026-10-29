@@ -101,6 +101,36 @@ func navBar(active string) string {
 }
 
 // 统一外壳：所有子页面都用它，保证有导航栏
+// appModeJS 让「用 open 打开的应用窗口」看起来像应用，而不是网页。
+//
+// 只在这个窗口里生效：openAppWindow 会在地址上带 ?app=1，这里记住之后才启用。
+// 普通浏览器打开同一个地址不受影响——调试的时候还得能按 Ctrl+R。
+//
+// 同时负责把窗口位置/大小回传给服务端（Edge 的 --app 窗口自己记不住），
+// 下次 open 时由 ui_window.go 原样还原。
+const appModeJS = `<script>(function(){try{
+var q=new URLSearchParams(location.search);
+if(q.get('app')==='1')localStorage.setItem('diskmon_app','1');
+var appMode=localStorage.getItem('diskmon_app')==='1';
+function report(){try{
+var g={x:Math.round(window.screenX||0),y:Math.round(window.screenY||0),
+w:Math.round(window.outerWidth||0),h:Math.round(window.outerHeight||0)};
+if(g.w<640||g.h<480)return;
+navigator.sendBeacon('/api/geom',JSON.stringify(g));}catch(e){}}
+if(appMode){
+window.addEventListener('load',report);
+var t=null;
+window.addEventListener('resize',function(){clearTimeout(t);t=setTimeout(report,800);});
+setTimeout(report,1200);
+document.addEventListener('contextmenu',function(e){e.preventDefault();},true);
+document.addEventListener('keydown',function(e){
+var k=(e.key||'').toLowerCase();
+if(k==='f5'||k==='f12'||((e.ctrlKey||e.metaKey)&&(k==='r'||k==='u'||
+(e.shiftKey&&(k==='i'||k==='j'||k==='c'))))){
+e.preventDefault();e.stopPropagation();return false;}},true);
+}
+}catch(e){}})();</script>`
+
 func appShell(title, active, body string) string {
 	switch active {
 	case "dup", "media", "leftovers":
@@ -111,10 +141,10 @@ func appShell(title, active, body string) string {
 	}
 	html := `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>` + htmlEscape(title) + ` · diskmon</title>
+<title>` + htmlEscape(title) + ` · 磁盘监测</title>
 <link rel="icon" href="/favicon.ico">
 <style>` + css + navCSS + themeCSS() + `</style></head><body><div class="wrap">` + navBar(active) + dataDirBanner() + muteBanner() + body + uiJS + `</div></body></html>`
-	html = strings.Replace(html, "</body></html>", loadOverlay+"</body></html>", 1)
+	html = strings.Replace(html, "</body></html>", appModeJS+loadOverlay+"</body></html>", 1)
 	return translateHTML(html)
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -9,6 +10,62 @@ import (
 	"syscall"
 	"time"
 )
+
+// uiGeom 是上次窗口的位置和大小。存在 ui-profile 旁边——
+// 那里一定是可写的（profile 就在那儿），不依赖 cfg.DataDir 是否降级。
+type uiGeom struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+	W int `json:"w"`
+	H int `json:"h"`
+}
+
+// uiGeomFile 是窗口几何的落盘位置，由 openStore 在启动时设成「数据目录」下的文件。
+//
+// 曾经把它放在 Edge 的 ui-profile 旁边，结果写入报 Access is denied——
+// 那个目录归浏览器所有，不是我们的地盘。数据目录才是这个程序一直在写的地方
+// （state.json、日志都在那儿），放这里才一定写得进去。
+var uiGeomFile string
+
+func uiGeomPath() string {
+	if uiGeomFile != "" {
+		return uiGeomFile
+	}
+	// 兜底：万一没被初始化（比如单元测试直接调），退回 LOCALAPPDATA。
+	return filepath.Join(os.Getenv("LOCALAPPDATA"), "diskmon", "ui-window.json")
+}
+
+func loadUIGeom() (uiGeom, bool) {
+	b, err := os.ReadFile(uiGeomPath())
+	if err != nil {
+		return uiGeom{}, false
+	}
+	var g uiGeom
+	if json.Unmarshal(b, &g) != nil {
+		return uiGeom{}, false
+	}
+	// 太小的值不认——那多半是窗口最小化或异常时记下来的。
+	if g.W < 640 || g.H < 480 {
+		return uiGeom{}, false
+	}
+	return g, true
+}
+
+func saveUIGeom(g uiGeom) error {
+	if g.W < 640 || g.H < 480 {
+		return nil
+	}
+	_ = os.MkdirAll(filepath.Dir(uiGeomPath()), 0o755)
+	b, err := json.Marshal(g)
+	if err != nil {
+		return err
+	}
+	tmp := uiGeomPath() + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, uiGeomPath())
+}
 
 // portListening 探测本机端口上有没有服务在听。目标是 127.0.0.1，250ms 足够。
 func portListening(port int) bool {
@@ -34,14 +91,14 @@ func ensureServer(port int) bool {
 		logf("ui: 取不到自身路径，无法拉起后台服务：%v", err)
 		return false
 	}
-	cmd := exec.Command(exe, "serve")
+	cmd := exec.Command(exe, "tray")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Start(); err != nil {
 		logf("ui: 后台服务起不来：%v", err)
 		return false
 	}
 	_ = cmd.Process.Release() // 不等它，也不让它随本进程退出而结束
-	logf("ui: 检测到服务没在跑，已拉起后台服务（端口 %d）", port)
+	logf("ui: 检测到服务没在跑，已拉起托盘+服务（端口 %d）", port)
 
 	// 最多等 5 秒。首次启动要读配置、起 HTTP 服务，通常 1 秒内就绪。
 	for i := 0; i < 50; i++ {
@@ -56,9 +113,28 @@ func ensureServer(port int) bool {
 // openAppWindow 用 Edge/Chrome 的 --app 模式打开，外观是独立窗口（无地址栏、无标签页），
 // 使用独立 profile，所以任务栏图标和窗口分组独立于日常浏览器。
 func openAppWindow(port int) {
-	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
+	// app=1 让页面知道自己是「应用窗口」：据此禁用 F5/右键/F12 这类浏览器键。
+	// 普通浏览器打开同一个地址不会被这个标记影响。
+	url := fmt.Sprintf("http://127.0.0.1:%d/?app=1", port)
 	profile := filepath.Join(os.Getenv("LOCALAPPDATA"), "diskmon", "ui-profile")
 	_ = os.MkdirAll(profile, 0o755)
+
+	// 上次的窗口位置和大小。Edge 的 --app 窗口不会自己记住，所以由页面回传、这里还原。
+	args := []string{
+		"--app=" + url,
+		"--user-data-dir=" + profile,
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--disable-features=Translate,MediaRouter",
+	}
+	if g, ok := loadUIGeom(); ok {
+		args = append(args,
+			fmt.Sprintf("--window-size=%d,%d", g.W, g.H),
+			fmt.Sprintf("--window-position=%d,%d", g.X, g.Y))
+	} else {
+		args = append(args, "--window-size=1280,880")
+	}
+
 	cands := []string{
 		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
 		`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
@@ -69,14 +145,7 @@ func openAppWindow(port int) {
 		if _, err := os.Stat(exe); err != nil {
 			continue
 		}
-		cmd := exec.Command(exe,
-			"--app="+url,
-			"--window-size=1280,880",
-			"--user-data-dir="+profile,
-			"--no-first-run",
-			"--no-default-browser-check",
-			"--disable-features=Translate,MediaRouter",
-		)
+		cmd := exec.Command(exe, args...)
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: false}
 		if cmd.Start() == nil {
 			logf("ui: 独立窗口已用 %s 打开", filepath.Base(exe))
