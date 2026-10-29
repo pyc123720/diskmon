@@ -3,6 +3,55 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.6.3
+
+The app window stopped being a browser tab wearing a shortcut's clothes: closing it no
+longer took the server down, it remembers where it was, and it stopped growing a pixel per
+launch. All of this release is that one sentence, taken apart.
+
+- **`open` starts the server when nothing is listening.** The desktop shortcut runs
+  `diskmon-go open`, and `open` only pointed a browser at `http://127.0.0.1:<port>` without
+  asking whether anything answered there — so after a reboot, or after the process was
+  killed, a click produced "can't reach this page" and no explanation. The user's word for it
+  was "又进不去了", the "又" meaning it had happened before. It now probes the port, spawns
+  `serve` detached if nothing answers, waits up to 5 s, and then opens the window. If the
+  server still will not come up it opens the static report instead and says so, so a click
+  always produces something readable rather than a dead tab.
+- **Closing the window leaves the tray running.** `open` launches `tray` rather than a bare
+  `serve`, which is what "close to tray" is supposed to mean; one left click on the icon
+  brings the window back. The title is 磁盘监测 instead of "diskmon", because the taskbar
+  name comes from the page title and this was the only place it could change.
+- **Browser shortcuts are off inside the app window** — F5, Ctrl+R, Ctrl+U, F12,
+  Ctrl+Shift+I/J/C and the context menu. Scoped by `?app=1`, which `open` appends: a normal
+  browser tab still reloads, because reloading is how you debug the page.
+- **The window remembers its position and size.** Edge's `--app` window remembers neither on
+  its own, so the page reports geometry to `/api/geom` and it is replayed as
+  `--window-position` / `--window-size`. The endpoint answers 200 or 400 with a reason now
+  instead of a bare 204 — the 204 had been covering a real failure: the file was written
+  next to Edge's `ui-profile`, a directory that belongs to the browser and answered "Access
+  is denied".
+- **Dragging the window is recorded, not just resizing.** Browsers have no `move` event, so a
+  position change was invisible to the page; there is now a 2 s poll that compares position
+  and size and reports only when they changed, plus a last report on `pagehide`.
+- **Both processes read the same geometry file.** The launcher and the server can be
+  different executables with different data directories, and each had kept its own
+  `ui-window.json` — the geometry one process wrote was never the file the other read back,
+  which looks exactly like nothing being saved at all. Prefer the user-level location, fall
+  back to the data dir when it is not writable, and let the reader try both candidates
+  instead of giving up on the first miss.
+- **The window no longer grows one pixel per launch.** Edge applies `--window-size` and then
+  reports `outerWidth` with a one-pixel frame difference, so storing the reported value and
+  feeding it back made the window a little wider and taller every time it opened — ten opens
+  a day is 300 px a month. A size within 4 px of the stored one now counts as unchanged and
+  keeps the stored value; a real resize is far more than 4 px, so it still lands.
+- **The category page's app button pointed at a route that does not exist.** The `confirm`
+  tier linked to `/apps`, which no handler serves — a 404 behind a button sitting exactly
+  where the next step should be, shipped with the category filter in 2.6.2 and fixed one
+  release later. It now goes to `/clean#appgroups`, and the cleanup centre's per-app card
+  carries the `appgroups` anchor to land on. That page also dropped `target="_blank"`:
+  inside an `--app` window every click was opening another top-level window, and "this feels
+  like browsing" came from exactly that.
+
 ## 2.6.2
 
 Category breakdown became navigable, in three steps.
