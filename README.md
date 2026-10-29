@@ -91,6 +91,34 @@ Choose *More info -> Run anyway*, or build from source (one command, see below) 
 A publicly trusted signature is prepared for ([docs/SIGNING.md](docs/SIGNING.md)) once the project
 has real users.
 
+### If antivirus flags this
+
+It happens, and it is not a sign that something is wrong. An unsigned Go binary that is new, has
+few installs, and launches built-in Windows tools (`powershell.exe` for uninstall/leftover queries,
+`dism.exe` for the component store, `explorer.exe` to open folders) matches the shape of what
+machine-learning heuristics look for. We have had our own builds quarantined this way during
+development — one engine called it `Trojan:Win32/Bearfoos.A!ml`, where the `!ml` suffix means the
+verdict came from a model, not a known signature.
+
+What that verdict does *not* mean: the binary is not packed, it makes no network calls of its own,
+and the source is right here in this repository.
+
+If it gets quarantined, in order:
+
+1. **Verify it first.** Compare `Get-FileHash .\diskmon-go.exe -Algorithm SHA256` against
+   `SHA256SUMS.txt` from the same release page. If it does not match, delete it — you got a bad
+   download, and the warning was right.
+2. **If it matches**, restore it from quarantine and add an allow entry, or simply build from
+   source (one command, see below) so nothing is downloaded at all.
+3. **Report the false positive** to Microsoft at
+   <https://www.microsoft.com/en-us/wdsi/filesubmission> ("I believe this file is incorrectly
+   detected as malware"). Third-party engines usually pick the file up once the big engine stops
+   calling it, so a report helps the next person more than it helps you.
+
+Please do not disable your antivirus to run this. If you are not comfortable with the verdict,
+build from source instead — that is the whole point of shipping a single-file, zero-dependency Go
+program with no network code in it.
+
 ### Scoop
 
 `powershell
