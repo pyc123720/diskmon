@@ -28,18 +28,54 @@ written and then never believed by the next process.
   the whole snapshot, because a volume-wide result has no per-subtree keys to reuse.
   - Across processes the in-process USN delta means nothing, so the cache carries the volume
     journal's coordinates — `JournalID`, `First`, `Next` — plain numbers, and therefore
-    persistable. Reuse requires the journal id to match and `Next` to be exactly equal. A
-    recreated journal, a USN that went backwards, an anchor pushed out of the journal window,
-    any new record, or coordinates that cannot be read all mean "unknown" and a rescan. The
-    anchor is stored only when the coordinates taken before and after the scan are identical,
-    i.e. nothing was written during the scan window; otherwise the snapshot is kept, but only
-    the process that produced it may use it.
-  - The limit, stated rather than glossed: this needs a write-free window of about 2.5 s on
-    the whole volume. On a busy machine that condition frequently fails, so a second
-    `diskmon scan` still re-reads. That is the intended trade — this is the number people
-    delete things against, and a stale account is worse than a slow scan. The next step is to
-    compare the records between the two anchors and require zero write / rename / delete
-    records instead of zero records.
+    persistable. Reuse requires the journal id to match, and then the records between the two
+    coordinates to contain nothing that counts as a change (below). A recreated journal, a USN
+    that went backwards, an anchor pushed out of the journal window, coordinates that cannot be
+    read, or a delta with a change in it all mean "unknown" and a rescan. The anchor is stored
+    only when the coordinates before and after the scan agree *and* nothing between them counts
+    as a change; otherwise the snapshot is kept, but only the process that produced it may use
+    it.
+  - **What counts as a change, and what does not.** Exactly one reason bit is exempt: `CLOSE`
+    (0x80000000). Windows writes a USN entry only when something actually changed — opening a
+    file, reading it and querying attributes produce no entry at all — so a record carrying
+    nothing but `CLOSE` says the file was closed and nothing else happened to it; reason bits
+    accumulate by OR, so a write cannot hide behind it. Every other bit counts: basic info
+    change (mtime feeds `DayWrites` and `TopFiles`), security change (owner, so `Owners`
+    drifts), hard-link change (`Shared` / `Unique` change meaning), reparse-point change (what
+    a walk sees changes), and the rest — indexable, object id, integrity, compression,
+    encryption, stream, transacted, desired storage class — which rarely move a byte but are
+    also rare, so exempting them would buy almost nothing while still costing something. An
+    unrecognised bit counts too: the test is `reason &^ CLOSE != 0`, and the default answer is
+    "changed".
+  - **When it cannot tell, it rescans.** That is the line the relaxation rests on. Coordinates
+    equal means no record at all and no read needed; anything else is read record by record,
+    and a read that fails, a record it cannot parse (length out of range, shorter than the
+    60-byte header, not 8-byte aligned, a version other than 2, a name field outside the
+    record, half a record at the tail), a read it needed but did not perform, more than 20,000
+    records in the delta, or a cursor that did not advance are all "unknown" and all a rescan.
+    The structural checks are untouched: incomplete or invalid anchor, untrustworthy current
+    coordinates, journal id changed, USN going backwards, anchor pushed out of the window.
+  - **What this still cannot catch**, in the order it matters. First and by far the largest:
+    the journal is only as good as NTFS accounting. A write that bypasses NTFS — a raw-sector
+    write, an edit made while the volume is mounted offline, some imaging tools — leaves no USN
+    record, so what is really being checked is "the journal saw nothing", not "the disk did not
+    change", and no comparison of journal records can fix that. Second: if the journal is
+    purged during the few milliseconds spent reading `[anchor, now)`, the kernel can return
+    fewer records without an error, and USN values are not guaranteed to be contiguous, so a
+    missing middle cannot be detected from the records alone. It takes the anchor sitting at
+    the very edge of the window and an overflow inside that read; closing it would need one
+    more coordinate query afterwards, checking the journal id is unchanged and
+    `First <= anchor.Next` — about ten lines and one extra syscall, not part of this change.
+    Third: the gain is smaller than the name suggests. With only `CLOSE` exempt, a single real
+    write during the scan window still forces a rescan, so "busy machine, second scan
+    re-reads" remains true; what changed is that close-only noise no longer vetoes. Applying
+    the deltas to the snapshot instead would be a different piece of work. Fourth: 20,000
+    records is a hard cap, and hitting it means a rescan — hit rate traded for judgement cost,
+    on purpose. Fifth: record timestamps are not checked; the decision rests on reason bits
+    alone, and a timestamp would only add another input that cannot be trusted. Sixth, and in
+    the safe direction: named-stream writes, compression / encryption / integrity changes and
+    ACL changes each throw the whole snapshot away even when they never moved a number we
+    report.
 - **The cached snapshot was sharing its maps and slices with whoever held it.** Reading it
   back used `cp := *sc`, a shallow copy: `Cats`, `Deep`, `TopFiles` and friends pointed at
   the same backing arrays, so a caller sorting or accumulating the result was editing the
