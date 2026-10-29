@@ -98,14 +98,14 @@ func TestRuleEditFormCarriesEditing(t *testing.T) {
 
 	// 把表单值原样交给后端：必须走修改分支。
 	vals := url.Values{
-		"name":        {oldName},
-		"path":        {dir},
-		"max_size_mb": {"1024"},
-		"keep_days":   {"3"},
+		"name":         {oldName},
+		"path":         {dir},
+		"max_size_mb":  {"1024"},
+		"keep_days":    {"3"},
 		"interval_min": {"30"},
-		"enabled":     {"1"},
-		"dry_run":     {"1"},
-		"editing":     {m[1]},
+		"enabled":      {"1"},
+		"dry_run":      {"1"},
+		"editing":      {m[1]},
 	}
 	if err := saveRuleFromValues(vals, vals.Get("editing")); err != nil {
 		t.Fatalf("编辑已有规则被拒：%v", err)
@@ -134,5 +134,50 @@ func TestRuleSaveWithoutEditingRejectsDuplicate(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "已存在同名规则") {
 		t.Fatalf("应当报「已存在同名规则」，实际：%v", err)
+	}
+}
+
+// 规则里的目录要支持 %VAR% 写法。
+//
+// 全程序别处（/inspect、MCP、软件残留）都认 %TEMP%，只有保存规则这处漏了，
+// 于是「把 %LOCALAPPDATA%\Temp 粘进来」必然被判成"不存在"。
+func TestRulePathAcceptsPercentVars(t *testing.T) {
+	guardConfigWrite(t) // 保存成功会真的写配置文件
+	dir := testCleanDir(t)
+	t.Setenv("DISKMON_TEST_RULE_DIR", dir)
+	withRules(t, nil)
+
+	vals := url.Values{"name": {"百分号变量"}, "path": {`%DISKMON_TEST_RULE_DIR%`}}
+	if err := saveRuleFromValues(vals, ""); err != nil {
+		t.Fatalf("%%VAR%% 应当展开后保存，实际被拒：%v", err)
+	}
+	got := getConfig()
+	if len(got.Rules) != 1 {
+		t.Fatalf("应当存下一条规则，实际 %d 条", len(got.Rules))
+	}
+	if !strings.EqualFold(got.Rules[0].Path, dir) {
+		t.Fatalf("落盘的路径应当展开成 %q，实际 %q", dir, got.Rules[0].Path)
+	}
+}
+
+// 拒绝时要说清是哪一种原因——「不存在」和「是个文件」要能分辨，
+// 因为用户接下来要做的事完全不同（改路径 vs 换目标）。
+func TestRulePathRejectionsAreDistinguishable(t *testing.T) {
+	guardConfigWrite(t)
+	withRules(t, nil)
+
+	missing := filepath.Join(t.TempDir(), "definitely-not-here")
+	err := saveRuleFromValues(url.Values{"name": {"x"}, "path": {missing}}, "")
+	if err == nil || !strings.Contains(err.Error(), "不存在") {
+		t.Fatalf("不存在的目录应当报「不存在」，实际：%v", err)
+	}
+
+	file := filepath.Join(t.TempDir(), "a-file.txt")
+	if werr := os.WriteFile(file, []byte("x"), 0o644); werr != nil {
+		t.Fatalf("准备文件失败：%v", werr)
+	}
+	err = saveRuleFromValues(url.Values{"name": {"y"}, "path": {file}}, "")
+	if err == nil || !strings.Contains(err.Error(), "不是目录") {
+		t.Fatalf("传一个文件应当报「不是目录」，实际：%v", err)
 	}
 }

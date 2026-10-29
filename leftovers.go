@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"sync"
-	"time"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,16 +9,18 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
 
 // ---------- 卸载残留 ----------
 
 type uninstEntry struct {
-	Name        string `json:"DisplayName"`
-	Location    string `json:"InstallLocation"`
-	Uninstall   string `json:"UninstallString"`
-	Publisher   string `json:"Publisher"`
+	Name      string `json:"DisplayName"`
+	Location  string `json:"InstallLocation"`
+	Uninstall string `json:"UninstallString"`
+	Publisher string `json:"Publisher"`
 }
 
 type Leftover struct {
@@ -67,8 +67,11 @@ func queryUninstall() []uninstEntry {
 
 var pctVarRe = regexp.MustCompile(`%([A-Za-z0-9_() .]+)%`)
 
-// expandPath 同时支持 %TEMP% 和 $env:TEMP 两种写法
-func expandPath(p string) string {
+// expandVars 展开路径里的 %VAR% 和 $env:VAR 两种写法，别的什么都不动。
+//
+// 和 expandPath 分开，是因为结尾那个反斜杠得由调用方决定剥不剥：
+// C:\ 剥完就成 C:，在 Windows 上那是「当前盘当前目录」，是另一个路径。
+func expandVars(p string) string {
 	p = strings.TrimSpace(strings.Trim(p, `"`))
 	p = pctVarRe.ReplaceAllStringFunc(p, func(m string) string {
 		name := strings.Trim(m, "%")
@@ -77,8 +80,12 @@ func expandPath(p string) string {
 		}
 		return m
 	})
-	p = os.ExpandEnv(p)
-	return strings.TrimRight(p, `\`)
+	return os.ExpandEnv(p)
+}
+
+// expandPath 同时支持 %TEMP% 和 $env:TEMP 两种写法
+func expandPath(p string) string {
+	return strings.TrimRight(expandVars(p), `\`)
 }
 
 func dirExists(p string) bool {
@@ -159,7 +166,9 @@ var leftoverNameBlock = map[string]bool{
 	"tempprofile": true, "pip": true, "cache": true, "wsl": true, "docker": true,
 }
 
-func nameBlocked(name string) bool { return leftoverNameBlock[strings.ToLower(strings.TrimSpace(name))] }
+func nameBlocked(name string) bool {
+	return leftoverNameBlock[strings.ToLower(strings.TrimSpace(name))]
+}
 
 // 目录里若含有 exe（两层内，>1MB），说明可能是便携安装，不宜当残留
 func dirHasExe(dir string) bool {

@@ -128,14 +128,25 @@ func rulesPage(cfg Config, st *Store, editName string) string {
 func saveRuleFromValues(vals url.Values, editing string) error {
 	cfg := getConfig()
 	name := strings.TrimSpace(vals.Get("name"))
-	path := os.ExpandEnv(strings.TrimSpace(vals.Get("path")))
+	// 这里要用 expandVars，不能用 os.ExpandEnv：后者只认 $TEMP，不认 %TEMP%。
+	// /inspect、MCP、软件残留都认 %TEMP%，只有这一处不认，于是「把 %LOCALAPPDATA%\Temp
+	// 粘进来保存」必然被判成"不存在"——用户看到的就是那句莫名其妙的「不可读」。
+	path := expandVars(vals.Get("path"))
 	if name == "" || path == "" {
 		return fmt.Errorf("名称和目录都不能为空")
 	}
 	path = filepath.Clean(path)
 	st, err := os.Stat(path)
-	if err != nil || !st.IsDir() {
-		return fmt.Errorf("目录不存在或不可读：%s", path)
+	if err != nil {
+		// 三种原因分开说。混成一句「不存在或不可读」，用户没法判断
+		// 该改路径、还是该去看权限——而这三种情况要做的处理完全不同。
+		if os.IsNotExist(err) {
+			return fmt.Errorf("目录不存在：%s", path)
+		}
+		return fmt.Errorf("目录访问不了（权限不足或被占用）：%s（%v）", path, err)
+	}
+	if !st.IsDir() {
+		return fmt.Errorf("这是个文件，不是目录：%s", path)
 	}
 	rule := CleanRule{Name: name, Path: path}
 	if why, ok := ruleGuard(cfg, rule); !ok {
