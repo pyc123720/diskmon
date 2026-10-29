@@ -105,15 +105,12 @@ func mustVolume(root string) Volume {
 	return v
 }
 
-// 阈值档位变化时告警（只在进入更差档位时提醒一次）
+// 阈值档位变化时告警。防抖与落盘都在 lowspace.go：
+// 这里保留原来的调用形状（两条采样循环不用改），last 已不再使用——
+// 真正的"上次档位"存在 <数据目录>/lowspace.json，进程重启也不会重复通知。
 func checkThreshold(cfg Config, st *Store, v Volume, last string) string {
-	lvl := levelOf(v, cfg)
-	if lvl != last && lvl != "ok" {
-		msg := fmt.Sprintf("剩余空间进入 %s 档：%.1f GB", levelText(lvl), gb(v.Free))
-		st.AddAlert("threshold", msg)
-		notify("diskmon 空间告警", msg, true)
-	}
-	return lvl
+	_ = last
+	return observeSpace(cfg, st, v)
 }
 
 func usnLoop(cfg Config, st *Store, tailer *UsnTailer, threshold uint64) error {
