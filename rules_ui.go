@@ -92,7 +92,14 @@ func rulesPage(cfg Config, st *Store, editName string) string {
 		return ""
 	}
 	b.WriteString(`<h3 style="margin-top:28px">` + htmlEscape(title) + `</h3>`)
-	b.WriteString(`<form method="post" action="/rules/save" style="max-width:680px">
+	b.WriteString(`<form method="post" action="/rules/save" style="max-width:680px">`)
+	// 编辑态必须把「我正在改哪一条」带回后端。少了这个字段，saveRuleFromValues
+	// 会把这次保存当成新建，一头撞进同名判据——界面只报「已存在同名规则」，
+	// 而那条规则一个字都改不了。字段名要和 serve.go 里读的 editing 对上。
+	if ok {
+		b.WriteString(`<input type="hidden" name="editing" value="` + htmlEscape(editing.Name) + `">`)
+	}
+	b.WriteString(`
 <div class="muted" style="margin:6px 0">名称</div>
 <input name="name" required value="` + val(func(r CleanRule) string { return r.Name }) + `" style="width:100%;padding:8px;background:#1c212b;border:1px solid #2a3240;border-radius:8px;color:#e7ebf2">
 <div class="muted" style="margin:12px 0 6px">目录（必须存在，且属「可清」类）</div>
