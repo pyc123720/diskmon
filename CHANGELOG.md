@@ -3,6 +3,50 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.6.4
+
+Two things that had been reporting success while doing nothing: a save button that answered
+"a rule with this name already exists" when there was no duplicate, and a scan cache that was
+written and then never believed by the next process.
+
+- **Saving an edited rule now reaches the handler.** The edit page never told the server
+  which rule it was editing: `serve.go` read `PostForm("editing")`, the form had no such
+  field, so every save was treated as a new rule and collided with the same-name check. The
+  message said 已存在同名规则 and there was no duplicate to be found — the check was right,
+  the input had simply never been sent. The hidden field is emitted only when the page really
+  is editing an existing rule: sending it unconditionally would carry a name that does not
+  exist in create mode and push the backend into its rename-rejection path, which is a
+  different failure. It has to sit *inside* the `<form>` — outside it the browser does not
+  submit it, and the page looks fixed without being fixed. The test renders the edit page,
+  pulls the field back out and drives the same values through `saveRuleFromValues`, so the
+  form side and the handler side are covered together; deleting the field turns it red.
+- **The MFT result is kept, and a second process can reuse it.** MFT used to return without
+  writing anything, so an elevated `scan` re-read the whole `$MFT` — about 1.1 million
+  records — on every run. The snapshot is now written, and a snapshot with no sub-trees is
+  deliberately *not* accepted as a walk cache: the walk path would then scan every top-level
+  subtree, an order of magnitude slower than reading the MFT. Any dirty subtree invalidates
+  the whole snapshot, because a volume-wide result has no per-subtree keys to reuse.
+  - Across processes the in-process USN delta means nothing, so the cache carries the volume
+    journal's coordinates — `JournalID`, `First`, `Next` — plain numbers, and therefore
+    persistable. Reuse requires the journal id to match and `Next` to be exactly equal. A
+    recreated journal, a USN that went backwards, an anchor pushed out of the journal window,
+    any new record, or coordinates that cannot be read all mean "unknown" and a rescan. The
+    anchor is stored only when the coordinates taken before and after the scan are identical,
+    i.e. nothing was written during the scan window; otherwise the snapshot is kept, but only
+    the process that produced it may use it.
+  - The limit, stated rather than glossed: this needs a write-free window of about 2.5 s on
+    the whole volume. On a busy machine that condition frequently fails, so a second
+    `diskmon scan` still re-reads. That is the intended trade — this is the number people
+    delete things against, and a stale account is worse than a slow scan. The next step is to
+    compare the records between the two anchors and require zero write / rename / delete
+    records instead of zero records.
+- **The cached snapshot was sharing its maps and slices with whoever held it.** Reading it
+  back used `cp := *sc`, a shallow copy: `Cats`, `Deep`, `TopFiles` and friends pointed at
+  the same backing arrays, so a caller sorting or accumulating the result was editing the
+  cache in place, and the next reuse handed out polluted numbers. Writing had the same hole
+  from the other side — the cache stored `sc` itself, while the caller still holds that
+  value. Both sides now store and return a clone.
+
 ## 2.6.3
 
 The app window stopped being a browser tab wearing a shortcut's clothes: closing it no
