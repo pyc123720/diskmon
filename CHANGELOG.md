@@ -3,6 +3,212 @@
 All notable changes to this project. Versions follow `0.x → 1.x` during early development;
 the first public release is 1.4.x.
 
+## 2.6.1
+
+- **`scan` now uses the MFT engine by default**, with `scan --walk` as the escape hatch.
+  **The daemon paths (`watch` / `tray` / `serve`) deliberately keep it off**, and this was caught the
+  hard way. The MFT branch returns early on success — it does *not* write the incremental cache. Put
+  it in `ScanRootCached` for everyone and a 5-second watcher loop becomes "read the whole MFT every 5
+  seconds", i.e. every tick does a full scan. That is a slowdown dressed as a speedup. The
+  optimisation belongs to the one-shot command someone is waiting on; the daemons keep their USN
+  cache.
+  - Verified baseline (walk path, measured 3× today): **52.4–52.8 s** for `C:`, reporting
+    241,874 dirs / 158.25–158.27 GB. Unprivileged behaviour is otherwise unchanged.
+  - The MFT figure through `scan` itself is **not yet measured** — that path only runs elevated.
+    The ~5 s previously seen came from a diagnostic mode that does extra work. Treat the speedup as
+    "large, unquantified until someone runs an elevated `scan`" rather than quoting a ratio.
+
+Everything here came out of one question: *why does the MFT engine report 247,800 directories when
+the directory walk reports 258,118?* Chasing it produced five fixes and one retracted premise.
+
+- **Retracted: "directory count must match the walk."** That was the shipping criterion for `--mft`
+  and it was wrong. A new `walk-count` subcommand measured the walk on this machine at two
+  privilege levels: **241,879 directories as a normal user, 258,118 elevated — a 16,239 difference
+  for identical code on an identical volume.** The count is not a fact about the disk; it is a
+  function of who is asking, because `$Recycle.Bin`, `System32\config` and `System Volume
+  Information` are unreadable without elevation. MFT reads filesystem records and never consults an
+  ACL, so it lands **between** the two: 247,800. Byte totals are the stable, independently
+  checkable quantity instead — walk 158.27 GB vs MFT 157.10 GB, 0.74% apart, which is the size of
+  the known hard-link under-count.
+- **`walkStats` reported nothing about its own blind spots.** `filepath.WalkDir` hands back an error
+  for a directory it cannot read, and the callback returned `SkipDir` *before* `dirs++` — so an
+  unreadable directory was neither counted nor reported, and its whole subtree vanished silently.
+  Now split into `walkStatsFull` (returns a `walkResult` struct carrying `unreadable` and
+  `skippedReparse`) with `walkStats` kept as a thin compatibility wrapper, so no existing test
+  changed. Measured here: 560 unreadable directories, 1 junction.
+- **New `walk-count [drive]` subcommand.** Runs the walk only, needs no elevation, and prints the
+  count together with the two reasons that count is a **lower bound**. This exists so the next
+  person can ask "which side is wrong?" instead of assuming it is MFT.
+- **`scan --mft` and `mft-dump` disagreed about the directory count** — 222,980 vs 247,800, with the
+  24,820-record difference unmentioned. `scan` now prints the caveat inline rather than silently
+  reporting a smaller number than its own diagnostic mode.
+- **`$BadClus` was inflating the metadata figure to 204.76 GB.** It is a sparse file whose logical
+  size equals the *whole volume*, so summing it produced "205 GB of your 200 GB disk is NTFS
+  metadata" — a claim that would actively mislead anyone deciding what to delete. It now counts as
+  one file and contributes no bytes.
+- **The `$`-prefix metadata rule existed in two places.** `isMetadataRecord` used a name whitelist;
+  `buildPaths` still used `strings.HasPrefix(name, "$")`, which swallowed `$Recycle.Bin`'s entire
+  subtree. Fixed at the second site too, keeping only the whitelist. Found by reading the code, not
+  the data — the data had already been explained away once.
+- **Extension records now contribute `$DATA` sizes.** `parseExtData` recovers the real size from
+  records whose base reference points elsewhere; measured recovery was 7,613 files / 20.94 GB, and
+  MFT's total went 137.25 → 157.10 GB. Spot-checked against `hiberfil.sys`, which had read as 0 KB
+  and now reads 6.08 GB.
+
+## 2.6.0
+
+- **Scan results now carry two size figures instead of one.** `Total` stays what it always was —
+  the sum over every path, the same thing Explorer shows. `Shared` is the part we could prove is a
+  hard link, and `Unique` (= `Total - Shared`) is the figure that may be compared against the
+  volume's used space. This is the fix for `C:\Windows\WinSxS` reporting 18.46 GB: Microsoft's own
+  WinSxS documentation gives the same shape of error ("4.98 GB reported vs 507 MB of actual cost"),
+  and WizTree / WinDirStat / `du -u` / czkawka / Dism++ all de-duplicate while we did not.
+  - Detection uses volume serial + file index via `GetFileInformationByHandle`.
+  - To keep scanning fast, only files ≥ 8 MB are probed (`hardlinkProbeMin`), so `Shared` is a
+    **lower bound** — smaller hard links are not caught. Every surface that shows the number says
+    so; presenting an unbounded "physical size" would just be a new inaccuracy replacing the old one.
+  - The identity `Unique + Shared == Total` is enforced by construction and covered by a test.
+- **Categories are de-duplicated too, not just the grand total.** `CatsShared` records, per category,
+  how much of its figure is a hard link counted twice; the report now reads
+  "WinSxS 组件库（其中 2.73 GB 与系统目录共享）" and the tooltip gives the de-duplicated value
+  (18.46 → 15.73 GB here). `Cats` stays path-summed so it still adds up to `Total`.
+  The reclaimable-share card also switches to de-duplicated bytes — the same data cannot be
+  reclaimed twice, and letting hard links inflate "can be freed" would over-promise exactly where
+  users act on the number. Measured on this machine: shared across categories sums to 6.35 GB,
+  matching the global `Shared` exactly.
+  - Still path-summed: the per-directory lists (`dirs3` / `deep`). Those need a `Shared` field on
+    `DirEntry` to be consistent, which is a separate change.
+- **Files sitting in the scan root are now counted.** `ScanRootCached` only ever walked top-level
+  *directories*, so `pagefile.sys`, `hiberfil.sys`, `swapfile.sys` and friends were invisible. On this
+  machine that was 18.09 GB — the scan reported 137.87 GB against a volume using 165.47 GB. With the
+  root files included the same scan reports **155.98 GB** (155.96 GB by an independent Python walk).
+  They get their own categories (`system_pagefile` / `system_hiber`), so the "adjustable" tier stops
+  being wrong about them.
+- **Removed a misleading dead function.** An earlier attempt at work-stealing lived in
+  `scanRootParallel`, which nothing called — the real path is `ScanRootCached`, whose per-top-level-child
+  structure the incremental cache depends on. Deleting it is better than leaving something that looks
+  like the scan path but isn't. Real work-stealing has to keep the child-level cache keys valid, so it
+  is its own piece of work.
+- **winapp2.ini-compatible parser (`winapp2.go`, `diskmon-go.exe winapp2 <file>`).** Community rule
+  files can now be read and resolved: `%Var%` expansion, `RECURSE` / `REMOVESELF` flags, registry-only
+  sections reported and skipped, `ExcludeKey` counted, unknown variables left unresolved instead of
+  guessed, and paths that resolve to a drive root or a system root flagged as out of bounds.
+  **It deliberately does not delete anything** — a community rule file has no business driving
+  deletions without review, so this only produces a report.
+
+- **Quarantine is now described as a logical delete.** SECURITY.md states plainly that moving a file
+  into quarantine does not erase the data — bytes remain in free space, previous versions and
+  snapshots — and cites Gutmann (USENIX Security '96) and Wei et al. (FAST '11) on why overwriting
+  is not reliable erasure on modern media, SSD included.
+- Tests: 6 new cases, including an end-to-end `scanVolume` test on a real NTFS hard link that asserts
+  all three figures.
+
+- **Scan work is stolen, not pre-assigned.** `ScanRootCached` used to hand each top-level subtree to
+  one of three workers, so on this machine `Users` (58 GB) and `Windows` (40 GB) made the slowest
+  worker the finish line. It now splits each subtree into its direct subdirectories and lets workers
+  pull from a single queue, then merges the pieces back into **one Scan per top-level subtree** — the
+  incremental cache is keyed by subtree, so that regroup is not optional, it is the whole contract.
+  - Measured: 55.6 s → 53.1 s / 53.4 s. That is ~4%, which is inside run-to-run noise. I predicted
+    15–30% and was wrong: this disk was already saturated at three readers, so removing tail
+    imbalance bought almost nothing. The real lever is reading the MFT, not re-shuffling the walk.
+  - **The bug this introduced, and the fix.** Splitting the scan also split the hardlink identity
+    table, so `WinSxS` and `System32` landed in different workers and cross-directory duplicates
+    stopped being found — `Shared` silently fell from 6.35 GB to 3.98 GB. The identity table is now
+    scan-scoped and shared (`beginHardlinkScope`), `observe` only reports *whether* a file is the
+    second name, and each shard books its own duplicate bytes into its own `Shared`/`CatsShared`.
+    `Shared` is back to 6.36 GB with per-category totals summing to it exactly.
+- **Test count: 66.**
+
+- **`mft-dump`: an NTFS MFT reader that reconciles against the walk (`mft.go`).** Opens `\\.\X:`,
+  asks `FSCTL_GET_NTFS_VOLUME_DATA` for the geometry, then follows `$MFT`'s *own* data runs — the MFT
+  fragments, so a contiguous read from `MftStartLcn` silently stops at the first fragment — applies
+  update-sequence fixups, parses `$FILE_NAME` (parent + name, preferring Win32 over DOS) and `$DATA`
+  (real size), and rebuilds paths upward from record 5.
+  - **It is deliberately not wired into scanning.** The whole point is to prove the numbers agree
+    with `WalkDir` *before* anything trusts it, and that comparison needs administrator rights.
+  - **Not verified on this machine.** This session is not elevated, so `CreateFile("\\.\C:")` returns
+    `Access is denied`; `mft-dump` prints the reason and exits without touching normal scanning. Both
+    paths behave, but the reader itself has only ever run against synthetic records — **never against
+    a real MFT**. Treat the speed claim as unmeasured until someone runs it elevated.
+  - 15 unit tests cover what a volume is not needed for: `NTFS_VOLUME_DATA_BUFFER` parsing, signed
+    data-run decoding (including a negative delta), record headers, update-sequence fixups,
+    in-use / extension-record / bad-magic rejection, DOS-vs-Win32 name preference, truncated buffers,
+    path reconstruction, and a cyclic parent reference that must not hang.
+  - To verify: `diskmon-go.exe mft-dump C:` from an elevated prompt.
+  - **First real run (elevated) — speed confirmed, numbers still apart.**
+    Reading the MFT took **2.61–2.71 s** against **84–108 s** for the walk on the same volume:
+    **32–40×**. That part is settled.
+  - **Fixed and confirmed: NTFS metadata was in the total.** `$BadClus` is a sparse file whose
+    logical size equals the whole volume, which is how a 200 GB disk "contained" 334.60 GB. Metadata
+    records are now excluded and reported separately — the rerun shows **54,223 records / 203.01 GB**
+    excluded, i.e. very close to one full volume, as expected.
+  - **A theory of mine that the data killed.** I blamed the walk baseline's 178.57 GB on
+    `C:\Documents and Settings` being a junction onto `C:\Users`, and added a reparse-point skip.
+    With that skip in place the walk still reports **178.67 GB** — the number did not move, so
+    junctions were never the cause. The skip stays (it is correct anyway), but the explanation was
+    wrong and is recorded here as wrong.
+  - **Where it stands now, and why I stopped.** Measured on the same machine, three ways:
+    walk **178.77 GB** / 754,867 files, scanner **156.00 GB** / 685,686 files,
+    MFT **138.48 GB** / 665,765 files. The MFT sits *below* the scanner, so it under-counts.
+  - **One hypothesis tested and confirmed — and the target missed anyway.** Sizes used to be read only
+    from the `$DATA` attribute, so a file whose data stream had overflowed into an extension record
+    (attribute list) contributed 0. Sizes now come from `$FILE_NAME.RealSize`, which survives that
+    overflow. The rerun recovered **14,764 files / 4.94 GB**, and the total moved 133.51 → 138.48 GB —
+    exactly the predicted amount. The mechanism was real; it simply was not the whole gap. The agreed
+    acceptance target was 149.64 GB (the scanner's de-duplicated figure). 138.48 GB misses it by
+    11.16 GB, so work on this stops here by prior agreement rather than turning into another round.
+  - **What the rerun does narrow.** Every record that parsed landed in exactly one bucket
+    (`dirs 222,723 + files 665,765 + metadata 54,223 = 942,711` parsed), with `Unresolved = 0`. So
+    nothing leaks between parsing and counting, and the remaining gap is a **per-record size**
+    question, not a missing-files question. It does *not* prove that no in-use record failed
+    `parseRecord` — the 161,673 rejected slots are not separated into free vs. failed, and that
+    counter should be split before anyone trusts this further.
+  - **One place the MFT beats the walk.** It sees `C:\System Volume Information` (3.09 GB of shadow
+    copies here), which a directory walk cannot read at all. Part of the disagreement is the MFT being
+    *more* complete, not less — so "match the walk exactly" was never the right acceptance target.
+  - **Not wired into scanning.** Still true, and it stays true: a 44× faster scan that is 11 GB short
+    would be a worse tool than the slow correct one. The subcommand remains read-only and opt-in.
+  - **Two diagnostics added so the next run answers instead of guessing.** Neither changes any
+    measurement made so far; both make the next one decisive:
+    - `空闲槽位` and `解析失败` are now counted separately (`inUseRecord` reads only the record header).
+      They used to be one `dropped` figure, which left "do any *used* records fail to parse?" — the
+      single hypothesis that could explain a large under-count — permanently unanswerable.
+    - `mft-dump` now buckets both sides by top-level directory and prints the 8 largest differences,
+      so a single run localises the remaining gap to a subtree instead of another round of guessing.
+  - **Corrected an acceptance target of my own.** "Match the directory walk exactly" was wrong from the
+    start: the MFT can see `System Volume Information` (3.09 GB of shadow copies here) and a walk cannot.
+    The next comparison should be against a defined figure — the scanner's de-duplicated total plus the
+    walk's blind spots — not against the walk.
+  - **The parse-failure hypothesis is dead, and it died cleanly.** Splitting the counter showed
+    **57,612 extension records + 4 genuine oddities** out of 57,616. Attribute-list overflow records are
+    normal NTFS structure — their size belongs to the base record, so skipping them loses nothing.
+    Nothing is being dropped. (The earlier arithmetic, 11.16 GB / 57,616 ≈ 194 KB per record, was a
+    coincidence. It looked like an answer and was not, which is exactly why it was not reported as one.)
+  - **Where the remaining gap actually lives**, from the bucket comparison (MFT 138.80 GB against a
+    178.88 GB walk, net −40.08 GB): `Windows` −24.01, `Users` −7.23, root files −6.08,
+    `Program Files (x86)` −4.27, `Program Files` −1.41, `ProgramData` −0.48, and
+    `System Volume Information` **+3.41** — the MFT being *more* complete there, since a walk cannot
+    read shadow copies at all.
+  - **The sharpest lead: `hiberfil.sys` is absent from the MFT entirely.** Root files total 12.02 GB
+    against the walk's 18.09 GB, and the 6.08 GB difference is exactly hiberfil.sys's size — a file
+    that would rank second in the tool's own largest-entries list. It is not a size error; the record
+    never arrives. `Unresolved = 0` rules out the path-resolution bucket, so the next check is whether
+    it is being misfiled as an extension record, or sits outside the range we read.
+  - **Fixed: `$DATA` living in an extension record is now followed, not dropped.** This is the one
+    that moved the needle. A file whose data stream overflowed into an extension record (`$ATTRIBUTE_LIST`)
+    used to contribute 0 bytes unless `$FILE_NAME` happened to carry the size. Extension records were
+    being thrown away outright. Now the scan keeps their `$DATA` size keyed by base record and backfills
+    any file still sitting at 0. Measured on `C:\`: **7,610 files / 23.65 GB recovered in one run**, total
+    **137.25 → 158.51 GB**. `C:\hiberfil.sys` — the 6.08 GB sample that exposed this — reports 6.08 GB.
+  - The reconciliation gap collapsed with it: total **−40.08 → −15.51 GB**; `C:\Windows` −24.01 → −11.69,
+    `C:\Users` −7.22 → −1.67, `Program Files (x86)` −4.27 → −4.18.
+  - **What is left is probably not a bug.** The remaining `Windows` gap has a benign explanation: this
+    tool's own hard-link figure (6.36 GB) only probes files ≥ 8 MB, so it is a *lower bound* — and WinSxS
+    is mostly small files. An MFT record counts once; a path-summed walk counts per name. `Links` per
+    record is now tallied (`硬链接数>1 的记录 … 按路径求和会多算 …`), which measures that difference
+    directly instead of assuming it.
+- **Test count: 85.**
+
 ## 2.5.8
 
 - **Lazy clean can be paused, resumed and stopped.** While it is running, both the lazy page and

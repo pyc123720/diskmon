@@ -23,6 +23,26 @@ Manual cleanups (lazy clean, tiers, per-app, per-folder, duplicates, media) **mo
 - Indexed in `quarantine\index.jsonl` with a per-entry `.diskmon-meta.json` sidecar;
   `diskmon-go.exe quarantine-rebuild` can rebuild a corrupted index
 
+### Quarantine is a logical delete, not a secure erase
+
+Moving a file into quarantine removes it from its original path, but **it does not erase the
+data**. The bytes remain on the volume — inside the quarantine folder, in free space, in previous
+versions and in volume snapshots. Overwriting is not a reliable erasure either: Gutmann (USENIX
+Security '96) showed it fails on modern magnetic media, and Wei et al. (FAST '11) showed the same
+for SSDs, where wear levelling means logical overwrite ≠ physical overwrite.
+
+So: if you need the contents gone, treat this tool as "removed from view", not "destroyed".
+For real erasure use full-disk encryption from the start, or the drive vendor's secure-erase.
+
+### What the numbers mean
+
+- `Total` is the sum over every path — the same figure Explorer reports, and it **double-counts
+  hard links**. `C:\Windows\WinSxS` is the classic case: Microsoft's own documentation gives
+  4.98 GB reported vs 507 MB of actual cost.
+- `Shared` is the part we could prove is a hard link: files ≥8 MB are probed by volume serial +
+  file index. It is a **lower bound** — smaller hard links are not caught.
+- `Unique = Total - Shared`. Use this one when comparing against the volume's used space.
+
 ### The one destructive path: L2 auto-clean rules
 
 Rules can permanently delete files that are older than `keep_days` in a directory classified as

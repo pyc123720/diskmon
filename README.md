@@ -7,7 +7,9 @@
 A tray-resident Windows disk monitor that answers three questions:
 
 - **What is eating my C: drive?** — per-folder sizes, 20 categories, treemap
-- **What is growing right now?** — NTFS USN journal gives second-level attribution (file, folder, process)
+- **What is growing right now?** — the NTFS USN journal reports *which file changed*, once a second.
+  The byte count is a size sample taken right after — a USN record carries no size field, so writes
+  that coalesce inside one open→close window are reported as one change, not many.
 - **What can I safely delete?** — every cleanup goes to a quarantine you can undo for 7 days
 
 Monitoring is **read-only** by default. Nothing is deleted without an explicit click, and every
@@ -36,7 +38,8 @@ needs three confirmations.
 | Area | What you get |
 |---|---|
 | Monitoring | free space, 3-level thresholds, daily auto-scan, growth forecast, live scan progress (cancellable), 3-way parallel scan, incremental rescan (clean subtrees reused), instant rescan when nothing changed |
-| Attribution | USN journal (1 s), per-process write I/O (approx.), jump vs leak detection |
+| Attribution | USN journal (1 s) for *which file*; byte counts come from a post-event size sample; per-process write I/O (approx.); jump vs leak detection |
+| Size accounting | both "sum over paths" and "after hardlink dedup"; dedup probe covers files ≥8 MB and the report says so — it is a lower bound |
 | Analysis | 20 categories, treemap, snapshot diff (vs last / 7 days ago), app aggregation |
 | Media split | images / video / documents / audio / archives / programs, per folder |
 | Duplicates | two-stage hash, hardlink-aware, never touches install directories |
