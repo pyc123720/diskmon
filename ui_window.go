@@ -35,20 +35,39 @@ func uiGeomPath() string {
 	return filepath.Join(os.Getenv("LOCALAPPDATA"), "diskmon", "ui-window.json")
 }
 
+// uiGeomCandidates 列出「可能存过窗口几何」的位置，按可信度排序。
+//
+// 主位置是 uiGeomFile；再带上数据目录里的那一份，是为了兼容「另一个 exe 把几何
+// 写在自己的数据目录里」的情形——直接读得到，就不用再失败一次、退回默认尺寸。
+func uiGeomCandidates() []string {
+	var out []string
+	primary := uiGeomPath()
+	out = append(out, primary)
+	if dataDirActual != "" {
+		if p := filepath.Join(dataDirActual, "ui-window.json"); p != primary {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func loadUIGeom() (uiGeom, bool) {
-	b, err := os.ReadFile(uiGeomPath())
-	if err != nil {
-		return uiGeom{}, false
+	for _, p := range uiGeomCandidates() {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var g uiGeom
+		if json.Unmarshal(b, &g) != nil {
+			continue
+		}
+		// 太小的值不认——那多半是窗口最小化或异常时记下来的。
+		if g.W < 640 || g.H < 480 {
+			continue
+		}
+		return g, true
 	}
-	var g uiGeom
-	if json.Unmarshal(b, &g) != nil {
-		return uiGeom{}, false
-	}
-	// 太小的值不认——那多半是窗口最小化或异常时记下来的。
-	if g.W < 640 || g.H < 480 {
-		return uiGeom{}, false
-	}
-	return g, true
+	return uiGeom{}, false
 }
 
 func saveUIGeom(g uiGeom) error {

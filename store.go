@@ -86,8 +86,23 @@ func loadConfig() Config {
 	if dataDirRequested == "" {
 		dataDirRequested = cfg.DataDir
 	}
-	// 窗口几何存在数据目录里——那是这个程序已经证明可写的地方。
-	uiGeomFile = filepath.Join(cfg.DataDir, "ui-window.json")
+	// 窗口几何要跨进程共享，所以优先放用户级的固定位置，不能跟着数据目录走。
+	//
+	// 实情：桌面图标跑的是安装目录的 exe，而真正在出页面的服务可能是另一个目录里的
+	// exe。两边数据目录不同，各存一份几何就谁也读不到谁写的——「记住窗口位置」
+	// 会永远失效，而且两边看起来各自都正常。
+	//
+	// 但那个位置不一定写得进去（权限、隔离环境都会变），所以用程序自己的
+	// dirWritable 判断，写不进去就退回数据目录——宁可只在单进程内生效，也不要
+	// 留一个每次都被拒绝的路径。
+	sharedDir := filepath.Join(os.Getenv("LOCALAPPDATA"), "diskmon-go")
+	_ = os.MkdirAll(sharedDir, 0o755)
+	if dirWritable(sharedDir) {
+		uiGeomFile = filepath.Join(sharedDir, "ui-window.json")
+	} else {
+		uiGeomFile = filepath.Join(cfg.DataDir, "ui-window.json")
+		fmt.Printf("[info] %s 不可写，窗口几何改存 %s\n", sharedDir, uiGeomFile)
+	}
 	rotateLog(cfg.DataDir)
 	return cfg
 }
