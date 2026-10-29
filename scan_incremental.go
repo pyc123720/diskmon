@@ -22,7 +22,11 @@ type scanCache struct {
 	TS       int64            `json:"ts"`      // 上次扫描时间
 	FullTS   int64            `json:"full_ts"` // 上次"全量扫描"时间（对账基准）
 	Session  string           `json:"session"` // 进程会话令牌：跨进程缓存一律不认
-	Children map[string]*Scan `json:"children"`
+	Children map[string]*Scan `json:"children,omitempty"`
+	// Mft 是 MFT 引擎一次读完整卷的结果。它和 Children 互斥：读的是整卷，
+	// 拆不出「一个顶层子树一个 Scan」，所以只能整份存、整份用。
+	// 谁写谁就把另一份清掉——两套口径混在一张表里，会让"复用哪一份"变得说不清。
+	Mft *Scan `json:"mft,omitempty"`
 }
 
 var procSession = fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
@@ -44,7 +48,9 @@ func loadScanCache(cfg Config) *scanCache {
 		return nil
 	}
 	var c scanCache
-	if json.Unmarshal(b, &c) != nil || c.Root == "" || len(c.Children) == 0 {
+	// 只有 MFT 快照、没有子树，也是一份合法缓存。以前这里只认 Children，
+	// 于是 MFT 写进来的那份永远读不回来——写了等于没写。
+	if json.Unmarshal(b, &c) != nil || c.Root == "" || (len(c.Children) == 0 && c.Mft == nil) {
 		return nil
 	}
 	return &c
@@ -54,6 +60,69 @@ func saveScanCache(cfg Config, c *scanCache) {
 	if b, err := json.Marshal(c); err == nil {
 		_ = writeFileAtomic(cachePath(cfg), b)
 	}
+}
+
+// cacheFresh 是两种缓存共用的「还能不能用」判据：
+// 同一个进程会话、同一个根、不是强制全扫、USN 在跟踪、时间都没过期。
+//
+// 会话令牌这一条不是保守，是必需：usnEventsSince 用的是进程内的 USN 序号差，
+// 换一个进程就没有基准可比。跨进程复用 = "没法知道期间改了什么"，
+// 而这份数字是要给人拿去删东西的，宁可贵一点重扫，也不能报一份陈旧账。
+func cacheFresh(cache *scanCache, root string, forceFull bool, now time.Time) bool {
+	return !forceFull && cache != nil &&
+		strings.EqualFold(cache.Root, root) && cache.Session == procSession &&
+		usnActive.Load() &&
+		now.Sub(time.Unix(cache.TS, 0)) < 6*time.Hour &&
+		now.Sub(time.Unix(cache.FullTS, 0)) < 24*time.Hour
+}
+
+// walkCacheUsable 判断遍历缓存能不能参与本次增量。
+//
+// 必须要求 Children 非空：MFT 写下的缓存只有整卷快照、没有子树，
+// 若把它当成"可以复用"放进来，就会走过 MFT 分支（useCache=true 时它被跳过），
+// 然后逐个顶层子树全扫一遍——比直接读 MFT 慢一个数量级。
+func walkCacheUsable(cache *scanCache, root string, forceFull bool, now time.Time) bool {
+	return cacheFresh(cache, root, forceFull, now) && len(cache.Children) > 0
+}
+
+// cachedMftScan 返回上次 MFT 整卷扫描的结果（可以直接当本次结果用），nil 表示这次得重读。
+// 判据和遍历缓存同一套，另外多两条：
+//   - 只有开着 MFT 引擎才认这份缓存（`--walk` 必须真的走遍历）；
+//   - 整卷快照拆不出「哪一棵子树变了」，所以只要有一处脏标记，整份作废。
+//
+// 反过来，脏集合为空时复用它是安全的——那正是遍历缓存逐子树复用的同一个前提。
+func cachedMftScan(cache *scanCache, root string, forceFull bool, dirty map[string]bool, allDirty bool, now time.Time) *Scan {
+	if !useMftEngine || cache == nil || cache.Mft == nil {
+		return nil
+	}
+	if !cacheFresh(cache, root, forceFull, now) {
+		return nil
+	}
+	if allDirty || len(dirty) > 0 {
+		return nil
+	}
+	return cache.Mft
+}
+
+// saveMftScanCache 把一次成功的 MFT 结果写进增量缓存，行为对齐遍历路径。
+//
+// 以前 MFT 成功时直接 return，什么都不留——于是管理员每次 scan 都得把整个 $MFT
+// 重读一遍（约 110 万条记录）。写下来之后，同一个进程里下一次扫描只要 USN 说
+// "没有任何写入"，就能直接拿这份结果（见 cachedMftScan）。
+//
+// 只有真成功才写：ok=false、回落遍历、被取消的路径都不碰它——半成品缓存比没有缓存更坏，
+// 因为它会被当成完整结果用在下一轮。
+func saveMftScanCache(cfg Config, sc *Scan) {
+	if sc == nil {
+		return
+	}
+	now := time.Now().Unix()
+	// Root 用 cfg.Root 而不是 sc.Root：读的一侧拿 cfg.Root 比对，两边写法必须一致
+	// （MFT 引擎内部会把根补成带反斜杠的形式）。
+	saveScanCache(cfg, &scanCache{
+		Root: cfg.Root, TS: now, FullTS: now,
+		Session: procSession, Mft: sc,
+	})
 }
 
 // topChild 返回路径所属的顶层子树（结尾带分隔符），如 C:\Users\
@@ -148,11 +217,13 @@ func ScanRootCached(cfg Config, forceFull bool) (*Scan, string) {
 		return scanVolume(cfg, cfg.Root), "full"
 	}
 	cache := loadScanCache(cfg)
-	useCache := !forceFull && cache != nil && strings.EqualFold(cache.Root, cfg.Root) &&
-		cache.Session == procSession && usnActive.Load() &&
-		time.Since(time.Unix(cache.TS, 0)) < 6*time.Hour &&
-		time.Since(time.Unix(cache.FullTS, 0)) < 24*time.Hour
-	if useCache {
+	now := time.Now()
+	useCache := walkCacheUsable(cache, cfg.Root, forceFull, now)
+	// 上次 MFT 整卷扫描的结果还在不在？静态条件（会话、根、时效）够不够，
+	// 得等脏集合出来才算数——所以这里只用来决定"要不要等一次 USN 轮询"。
+	hasMftCache := useMftEngine && cache != nil && cache.Mft != nil &&
+		cacheFresh(cache, cfg.Root, forceFull, now)
+	if useCache || hasMftCache {
 		// 扫描前必须等一次"扫描开始之后"的 USN 轮询：
 		// 否则刚改动的文件还没进脏集合，会被误判为没变。
 		waitUSNPoll(3*time.Second, 8*time.Second)
@@ -163,12 +234,28 @@ func ScanRootCached(cfg Config, forceFull bool) (*Scan, string) {
 		useCache = false
 	}
 
+	// 整卷一次都没动过，就直接交上次的 MFT 结果——"第二次起变快"真正生效的地方，
+	// 这一次连 $MFT 都不读。脏集合里有任何一条子树，整份快照作废（拆不出子树）。
+	if sc := cachedMftScan(cache, cfg.Root, forceFull, dirty, all, now); sc != nil {
+		cp := *sc
+		cp.TS = scanStart.Unix()
+		cp.Duration = time.Since(scanStart).Seconds()
+		return &cp, "cached"
+	}
+
 	// MFT 引擎在这里才尝试，位置是有讲究的：
 	// 它要替代的是「昂贵的那一次全量走盘」，而不是增量更新。
 	// 早先它写在函数最开头，结果常驻路径（watch/tray/serve）每次刷新都绕过 USN 缓存、
 	// 重读一遍 MFT 表——每 5 秒读 3 秒，比增量更新还慢。那把加速用成了减速。
 	if !useCache && useMftEngine {
 		if sc, ok := scanVolumeViaMft(cfg, cfg.Root); ok {
+			// 成功才落缓存，和遍历路径的行为对齐：下一次同进程扫描只要 USN 说没写入，
+			// 就能直接复用这份结果，不必再读 110 万条记录。
+			// 被取消的那一次数据是残的——残的写进去比没有更坏，它会被当成完整结果。
+			if !scanCancelled() {
+				saveMftScanCache(cfg, sc)
+				clearDirtyBefore(scanStart)
+			}
 			return sc, "mft"
 		}
 		fmt.Println("  MFT 引擎不可用（需管理员权限 + NTFS），回落到目录遍历")
