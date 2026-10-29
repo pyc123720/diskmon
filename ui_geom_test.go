@@ -48,3 +48,31 @@ func TestUIGeomRoundTrip(t *testing.T) {
 		t.Fatalf("目录缺失时应当能自建：%v", err)
 	}
 }
+
+// 窗口大小不能因为「边框换算差 1 像素」而每开一次就长一点。
+func TestUIGeomIgnoresFrameDrift(t *testing.T) {
+	old := uiGeomFile
+	t.Cleanup(func() { uiGeomFile = old })
+	uiGeomFile = filepath.Join(t.TempDir(), "ui-window.json")
+
+	base := uiGeom{X: 27, Y: 93, W: 1282, H: 882}
+	if err := saveUIGeom(base); err != nil {
+		t.Fatalf("首次存盘失败：%v", err)
+	}
+
+	// 这就是实测到的现象：传 1282 下去，读回来 1283
+	if err := saveUIGeom(uiGeom{X: 27, Y: 93, W: 1283, H: 883}); err != nil {
+		t.Fatalf("存盘失败：%v", err)
+	}
+	if g, _ := loadUIGeom(); g.W != 1282 || g.H != 882 {
+		t.Fatalf("1 像素的边框差被当成改动记了下来：%+v，应当仍是 %dx%d", g, 1282, 882)
+	}
+
+	// 但用户真的拉动窗口时必须生效
+	if err := saveUIGeom(uiGeom{X: 27, Y: 93, W: 1400, H: 960}); err != nil {
+		t.Fatalf("存盘失败：%v", err)
+	}
+	if g, _ := loadUIGeom(); g.W != 1400 || g.H != 960 {
+		t.Fatalf("真的改了大小时没生效：%+v", g)
+	}
+}

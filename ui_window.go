@@ -74,6 +74,16 @@ func saveUIGeom(g uiGeom) error {
 	if g.W < 640 || g.H < 480 {
 		return nil
 	}
+	// 差值在 4 像素内就当没动过，沿用旧值。
+	//
+	// 原因：Edge 的 --window-size 和页面读到的 outerWidth 差 1 像素（边框/阴影的
+	// 换算），把读到的值原样存回去再传给它，每开一次窗口就长 1 像素。一天开十次
+	// 窗口就大一圈，用不了一个月就撑满屏幕。4 像素的容差既能挡住这个漂移，也不会
+	// 吞掉用户真的去拉的那一下。
+	if prev, ok := loadUIGeom(); ok &&
+		absInt(g.W-prev.W) <= 4 && absInt(g.H-prev.H) <= 4 {
+		g.W, g.H = prev.W, prev.H
+	}
 	_ = os.MkdirAll(filepath.Dir(uiGeomPath()), 0o755)
 	b, err := json.Marshal(g)
 	if err != nil {
@@ -84,6 +94,13 @@ func saveUIGeom(g uiGeom) error {
 		return err
 	}
 	return os.Rename(tmp, uiGeomPath())
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // portListening 探测本机端口上有没有服务在听。目标是 127.0.0.1，250ms 足够。
